@@ -36,7 +36,13 @@ jobs:
           cd AIComposeCamera
           pwd
           ls -la
-          xcodegen generate --spec project.yml -v
+          xcodegen generate --spec project.yml 2>&1 | tee ../xcodegen.log || {
+            echo "### ❌ XcodeGen Error Log" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            cat ../xcodegen.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          }
           ls -la
 
       - name: 🔧 Patch project.pbxproj for Unsigned Build
