@@ -3,14 +3,14 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 
 /// Represents a scene filter recommendation based on image analysis.
-public struct SceneRecommendation {
-    public let sceneDescription: String
-    public let filterName: String
-    public let reason: String
+struct SceneRecommendation {
+    let sceneDescription: String
+    let filterName: String
+    let reason: String
 }
 
 /// Analyzes scene brightness and color temperature to recommend a CIFilter.
-public class SceneFilterRecommender {
+class SceneFilterRecommender {
     /// Serial queue to protect mutable `lastFilterType` state.
     private static let stateQueue = DispatchQueue(label: "com.aicompose.scenefilter.state")
     private static var _lastFilterType: FilterType = .natural
@@ -28,7 +28,7 @@ public class SceneFilterRecommender {
     }
 
     /// Shared CIContext for rendering efficiency.
-    private static let sharedContext = CIContext(options: nil)
+    static let sharedContext = CIContext(options: nil)
 
     /// Analyzes the given image and recommends a filter.
     ///
@@ -36,12 +36,14 @@ public class SceneFilterRecommender {
     ///   - image: The input `CIImage` to analyze.
     ///   - context: The `CIContext` used for rendering the analysis filter.
     /// - Returns: A `SceneRecommendation` detailing the suggested filter.
-    public static func recommend(for image: CIImage, context: CIContext = sharedContext) -> SceneRecommendation {
-        // Fallback to natural if extent is infinite (unlikely for camera but good to check)
-        guard let extent = image.extent.isFinite ? image.extent : nil else {
+    static func recommend(for image: CIImage, context: CIContext = sharedContext) -> SceneRecommendation {
+        // Fallback to natural if extent is invalid or infinite
+        guard !image.extent.isEmpty, !image.extent.isInfinite else {
             lastFilterType = .natural
             return SceneRecommendation(sceneDescription: "Balanced scene", filterName: "Natural", reason: "Scene looks great as-is, no filter needed")
         }
+        
+        let extent = image.extent
         
         // 1. Calculate average brightness using CIAreaAverage filter
         let areaAverageFilter = CIFilter.areaAverage()
@@ -106,7 +108,7 @@ public class SceneFilterRecommender {
     ///
     /// - Parameter image: The `UIImage` to process.
     /// - Returns: A new `UIImage` with the filter applied, or the original image if no filter or natural was recommended.
-    public static func applyLastFilter(to image: UIImage) -> UIImage {
+    static func applyLastFilter(to image: UIImage) -> UIImage {
         guard lastFilterType != .natural,
               let cgImage = image.cgImage else {
             return image

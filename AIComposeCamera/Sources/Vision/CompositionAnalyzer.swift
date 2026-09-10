@@ -19,7 +19,7 @@ struct CompositionAnalyzer {
             do {
                 try handler.perform([request])
                 
-                guard let results = request.results as? [VNSaliencyImageObservation],
+                guard let results = request.results,
                       let firstResult = results.first,
                       let salientObjects = firstResult.salientObjects,
                       let bestObject = salientObjects.first else {

@@ -37,15 +37,15 @@ final class CameraViewModel: NSObject, ObservableObject {
 
     // MARK: - Session & Outputs
 
-    let captureSession = AVCaptureSession()
-    private let photoOutput = AVCapturePhotoOutput()
-    private let videoDataOutput = AVCaptureVideoDataOutput()
-    private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+    nonisolated let captureSession = AVCaptureSession()
+    nonisolated private let photoOutput = AVCapturePhotoOutput()
+    nonisolated private let videoDataOutput = AVCaptureVideoDataOutput()
+    nonisolated private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
 
     // MARK: - Queues
 
-    private let sessionQueue = DispatchQueue(label: "com.aicompose.camera.session")
-    private let analysisQueue = DispatchQueue(label: "com.aicompose.camera.analysis", qos: .userInitiated)
+    nonisolated private let sessionQueue = DispatchQueue(label: "com.aicompose.camera.session")
+    nonisolated private let analysisQueue = DispatchQueue(label: "com.aicompose.camera.analysis", qos: .userInitiated)
 
     // MARK: - Throttling
 
