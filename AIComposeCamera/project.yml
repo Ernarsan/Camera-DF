@@ -4,8 +4,6 @@ options:
   bundleIdPrefix: com.aicompose
   deploymentTarget:
     iOS: "16.0"
-  xcodeVersion: "15.0"
-  generateEmptyDirectories: true
 
 settings:
   base:
@@ -37,10 +35,3 @@ targets:
         CODE_SIGNING_REQUIRED: "NO"
         CODE_SIGN_IDENTITY: ""
         DEVELOPMENT_TEAM: ""
-    info:
-      properties:
-        UILaunchStoryboardName: LaunchScreen
-        UISupportedInterfaceOrientations:
-          - UIInterfaceOrientationPortrait
-        NSCameraUsageDescription: "AI Compose Camera needs camera access to analyze scenes and capture photos"
-        NSPhotoLibraryAddUsageDescription: "AI Compose Camera needs photo library access to save captured photos"

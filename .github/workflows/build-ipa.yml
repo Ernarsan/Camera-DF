@@ -34,7 +34,9 @@ jobs:
       - name: ⚙️ Generate Xcode Project
         run: |
           cd AIComposeCamera
-          xcodegen generate
+          pwd
+          ls -la
+          xcodegen generate --spec project.yml -v
           ls -la
 
       - name: 🔧 Patch project.pbxproj for Unsigned Build
