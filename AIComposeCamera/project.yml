@@ -27,8 +27,10 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aicompose.camera
-        INFOPLIST_KEY_NSCameraUsageDescription: "AI Compose Camera needs camera access to analyze scenes and capture photos"
-        INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "AI Compose Camera needs photo library access to save captured photos"
+        INFOPLIST_KEY_NSCameraUsageDescription: "AI Compose Camera needs camera access to analyze scenes, capture photos and record video"
+        INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "AI Compose Camera needs photo library access to save captured photos and videos"
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "AI Compose Camera needs microphone access to record video with audio"
+        INFOPLIST_KEY_NSMotionUsageDescription: "AI Compose Camera uses motion sensors for 360° panorama capture and alignment"
         GENERATE_INFOPLIST_FILE: true
         CODE_SIGN_STYLE: Manual
         CODE_SIGNING_ALLOWED: "NO"

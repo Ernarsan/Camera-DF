@@ -5,12 +5,16 @@ import Photos
 import SwiftUI
 import UIKit
 
-/// Central view model that manages the camera session, frame analysis,
-/// photo capture, and publishes all state consumed by the UI layer.
+/// Central view model that manages camera session, frame analysis,
+/// photo/video capture, mode switching, and publishes all state for the UI.
 @MainActor
 final class CameraViewModel: NSObject, ObservableObject {
 
-    // MARK: - Published State (§5 of TZ)
+    // MARK: - App Mode
+
+    @Published var currentMode: CameraMode = .photo
+
+    // MARK: - Published State (Composition Analysis)
 
     @Published var isAnalyzing: Bool = false
     @Published var suggestedBox: CGRect?
@@ -21,31 +25,55 @@ final class CameraViewModel: NSObject, ObservableObject {
     @Published var capturedImage: UIImage?
     @Published var currentZoomFactor: CGFloat = 1.0
 
-    // AlignmentGuide
+    // Alignment Guide
     @Published var targetCompositionPoint: CGPoint?
     @Published var currentSubjectPoint: CGPoint?
     @Published var isAligned: Bool = false
     @Published var alignmentInstruction: String = ""
 
-    // NightEnhancer
+    // Night Enhancer
     @Published var isLowLight: Bool = false
 
-    // UI state
+    // UI State
     @Published var isAlignmentModeOn: Bool = false
     @Published var isCameraAuthorized: Bool = false
     @Published var showCapturedPhoto: Bool = false
+
+    // Camera Controls
+    @Published var flashMode: FlashMode = .off
+    @Published var isHDR: Bool = false
+    @Published var timerDuration: TimerDuration = .off
+    @Published var showGrid: Bool = false
+    @Published var cameraPosition: AVCaptureDevice.Position = .back
+
+    // Timer countdown
+    @Published var timerCountdown: Int? = nil
+
+    // Video Recording
+    @Published var videoRecorder: VideoRecorder
+
+    // Panorama
+    @Published var panoramaManager = PanoramaManager()
+
+    // Session Photo Count
+    @Published var sessionPhotoCount: Int = 0
 
     // MARK: - Session & Outputs
 
     nonisolated let captureSession = AVCaptureSession()
     nonisolated private let photoOutput = AVCapturePhotoOutput()
     nonisolated private let videoDataOutput = AVCaptureVideoDataOutput()
+    nonisolated let movieOutput = AVCaptureMovieFileOutput()
     nonisolated private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
 
     // MARK: - Queues
 
     nonisolated private let sessionQueue = DispatchQueue(label: "com.aicompose.camera.session")
     nonisolated private let analysisQueue = DispatchQueue(label: "com.aicompose.camera.analysis", qos: .userInitiated)
+
+    // MARK: - Cancellables
+
+    private var cancellables = Set<AnyCancellable>()
 
     // MARK: - Throttling
 
@@ -56,11 +84,26 @@ final class CameraViewModel: NSObject, ObservableObject {
     // MARK: - Device
 
     private var currentDevice: AVCaptureDevice?
+    private var currentInput: AVCaptureDeviceInput?
 
     // MARK: - Init
 
     override init() {
+        let output = movieOutput
+        self.videoRecorder = VideoRecorder(movieOutput: output)
         super.init()
+
+        videoRecorder.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+
+        panoramaManager.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Public API
@@ -95,7 +138,17 @@ final class CameraViewModel: NSObject, ObservableObject {
     /// Apply the suggested zoom factor to the camera device.
     func applyZoom() {
         guard let device = currentDevice, let zoom = suggestedZoom else { return }
-        let clamped = min(max(zoom, 1.0), device.activeFormat.videoMaxZoomFactor)
+        setZoomFactor(zoom, on: device)
+    }
+
+    /// Set a specific zoom factor.
+    func setZoomFactor(_ factor: CGFloat) {
+        guard let device = currentDevice else { return }
+        setZoomFactor(factor, on: device)
+    }
+
+    private func setZoomFactor(_ factor: CGFloat, on device: AVCaptureDevice) {
+        let clamped = min(max(factor, 1.0), device.activeFormat.videoMaxZoomFactor)
         sessionQueue.async {
             do {
                 try device.lockForConfiguration()
@@ -126,11 +179,161 @@ final class CameraViewModel: NSObject, ObservableObject {
         }
     }
 
-    /// Capture a photo, apply the last recommended filter, and save to Photos.
+    /// Switch between front and back camera.
+    func flipCamera() {
+        let newPosition: AVCaptureDevice.Position = (cameraPosition == .back) ? .front : .back
+        cameraPosition = newPosition
+
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            self.captureSession.beginConfiguration()
+
+            // Remove current input
+            if let currentInput = self.captureSession.inputs.first as? AVCaptureDeviceInput {
+                self.captureSession.removeInput(currentInput)
+            }
+
+            // Add new input
+            let deviceType: AVCaptureDevice.DeviceType = .builtInWideAngleCamera
+            guard let device = AVCaptureDevice.default(deviceType, for: .video, position: newPosition),
+                  let input = try? AVCaptureDeviceInput(device: device) else {
+                self.captureSession.commitConfiguration()
+                return
+            }
+
+            if self.captureSession.canAddInput(input) {
+                self.captureSession.addInput(input)
+            }
+
+            self.captureSession.commitConfiguration()
+
+            Task { @MainActor [weak self] in
+                self?.currentDevice = device
+                self?.currentInput = input
+                self?.currentZoomFactor = 1.0
+            }
+        }
+    }
+
+    /// Toggle the torch (flashlight) for video mode.
+    func toggleTorch() {
+        guard let device = currentDevice, device.hasTorch else { return }
+        sessionQueue.async {
+            do {
+                try device.lockForConfiguration()
+                device.torchMode = device.torchMode == .on ? .off : .on
+                device.unlockForConfiguration()
+            } catch {
+                print("[CameraVM] Torch error: \(error)")
+            }
+        }
+    }
+
+    // MARK: - Photo Capture
+
+    /// Capture a photo with optional timer delay.
     func capturePhoto() {
+        if timerDuration != .off && timerCountdown == nil {
+            // Start countdown
+            timerCountdown = timerDuration.seconds
+            startTimerCountdown()
+            return
+        }
+        doCapture()
+    }
+
+    private func startTimerCountdown() {
+        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
+            Task { @MainActor [weak self] in
+                guard let self else {
+                    timer.invalidate()
+                    return
+                }
+                if let current = self.timerCountdown {
+                    if current <= 1 {
+                        timer.invalidate()
+                        self.timerCountdown = nil
+                        self.doCapture()
+                    } else {
+                        self.timerCountdown = current - 1
+                    }
+                }
+            }
+        }
+    }
+
+    private func doCapture() {
         let settings = AVCapturePhotoSettings()
-        settings.flashMode = .auto
+
+        // Flash mode
+        switch flashMode {
+        case .off:
+            settings.flashMode = .off
+        case .on:
+            settings.flashMode = .on
+        case .auto:
+            settings.flashMode = .auto
+        }
+
         photoOutput.capturePhoto(with: settings, delegate: self)
+    }
+
+    // MARK: - Video Recording
+
+    /// Start or stop video recording.
+    func toggleVideoRecording() {
+        if videoRecorder.isRecording {
+            videoRecorder.stopRecording()
+        } else {
+            videoRecorder.startRecording()
+        }
+    }
+
+    // MARK: - Panorama
+
+    /// Capture panorama photo at current position.
+    func capturePanoramaFrame() {
+        guard panoramaManager.nearbyPointIndex != nil else { return }
+
+        let settings = AVCapturePhotoSettings()
+        settings.flashMode = .off
+
+        // We'll use a special flag to know this is a panorama capture
+        // For simplicity, we capture via the photo output and handle in delegate
+        photoOutput.capturePhoto(with: settings, delegate: self)
+    }
+
+    // MARK: - Export to External Storage
+
+    /// Export image data to external storage via UIDocumentPickerViewController.
+    func exportToExternal(image: UIImage) {
+        guard let data = image.jpegData(compressionQuality: 0.92) else { return }
+
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AIComposeCamera_\(Int(Date().timeIntervalSince1970)).jpg")
+
+        do {
+            try data.write(to: tempURL)
+        } catch {
+            print("[CameraVM] Export write error: \(error)")
+            return
+        }
+
+        // Present document picker via scene
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let rootVC = windowScene.windows.first?.rootViewController else { return }
+
+        let picker = UIDocumentPickerViewController(forExporting: [tempURL], asCopy: true)
+        rootVC.present(picker, animated: true)
+    }
+
+    /// Share image via system share sheet.
+    func shareImage(_ image: UIImage) {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let rootVC = windowScene.windows.first?.rootViewController else { return }
+
+        let activityVC = UIActivityViewController(activityItems: [image], applicationActivities: nil)
+        rootVC.present(activityVC, animated: true)
     }
 
     // MARK: - Session Configuration
@@ -138,10 +341,22 @@ final class CameraViewModel: NSObject, ObservableObject {
     private func configureSession() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            captureSession.beginConfiguration()
-            captureSession.sessionPreset = .photo
+            self.captureSession.beginConfiguration()
+            if captureSession.canSetSessionPreset(.high) {
+                captureSession.sessionPreset = .high
+            } else {
+                captureSession.sessionPreset = .photo
+            }
 
-            // Input — back wide camera
+            // Audio input for video recording
+            if let audioDevice = AVCaptureDevice.default(for: .audio),
+               let audioInput = try? AVCaptureDeviceInput(device: audioDevice) {
+                if captureSession.canAddInput(audioInput) {
+                    captureSession.addInput(audioInput)
+                }
+            }
+
+            // Video input — back wide camera
             guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
                   let input = try? AVCaptureDeviceInput(device: device) else {
                 captureSession.commitConfiguration()
@@ -154,6 +369,7 @@ final class CameraViewModel: NSObject, ObservableObject {
 
             Task { @MainActor [weak self] in
                 self?.currentDevice = device
+                self?.currentInput = input
             }
 
             // Video data output (for frame analysis)
@@ -166,6 +382,11 @@ final class CameraViewModel: NSObject, ObservableObject {
             // Photo output
             if captureSession.canAddOutput(photoOutput) {
                 captureSession.addOutput(photoOutput)
+            }
+
+            // Video recorder output
+            if captureSession.canAddOutput(movieOutput) {
+                captureSession.addOutput(movieOutput)
             }
 
             captureSession.commitConfiguration()
@@ -188,24 +409,22 @@ extension CameraViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
 
-        // Read alignment mode flag from MainActor-isolated state
-        // We use a task to read it safely.
         Task { @MainActor [weak self] in
             guard let self else { return }
+
+            // Only analyze in photo mode
+            guard self.currentMode == .photo else { return }
+
             let alignmentMode = self.isAlignmentModeOn
             let lastTime = self.lastAnalysisTime
 
             if alignmentMode {
-                // Alignment mode — higher frequency (0.3 sec)
                 guard now - lastTime >= self.alignmentThrottleInterval else { return }
                 self.lastAnalysisTime = now
-
                 self.runAlignmentAnalysis(ciImage: ciImage)
             } else {
-                // Standard mode — composition + filter (0.6 sec)
                 guard now - lastTime >= self.compositionThrottleInterval else { return }
                 self.lastAnalysisTime = now
-
                 self.isAnalyzing = true
                 self.runCompositionAnalysis(ciImage: ciImage)
                 self.runFilterAnalysis(ciImage: ciImage)
@@ -281,6 +500,13 @@ extension CameraViewModel: AVCapturePhotoCaptureDelegate {
         Task { @MainActor [weak self] in
             guard let self else { return }
 
+            // Check if this is a panorama capture
+            if self.currentMode == .panorama {
+                self.panoramaManager.captureAtCurrentPosition(imageData: data)
+                return
+            }
+
+            // Standard photo flow
             // 1. Apply recommended filter
             var finalImage = SceneFilterRecommender.applyLastFilter(to: rawImage)
 
@@ -295,6 +521,7 @@ extension CameraViewModel: AVCapturePhotoCaptureDelegate {
             // 3. Show captured image
             self.capturedImage = finalImage
             self.showCapturedPhoto = true
+            self.sessionPhotoCount += 1
 
             // 4. Save to Photos
             self.saveToPhotoLibrary(finalImage)
