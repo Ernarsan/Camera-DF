@@ -179,6 +179,7 @@ struct ContentView: View {
                 recordingDuration: viewModel.videoRecorder.recordingDuration,
                 currentZoom: viewModel.currentZoomFactor,
                 flashEnabled: viewModel.flashMode == .on,
+                supportsUltraWide: viewModel.supportsUltraWide,
                 onToggleRecording: {
                     viewModel.toggleVideoRecording()
                 },
@@ -273,8 +274,9 @@ struct ContentView: View {
     // MARK: - Zoom Row
 
     private var zoomRow: some View {
-        HStack(spacing: 8) {
-            ForEach([0.5, 1.0, 2.0, 5.0, 10.0], id: \.self) { factor in
+        let factors: [CGFloat] = viewModel.supportsUltraWide ? [0.5, 1.0, 2.0, 5.0, 10.0] : [1.0, 2.0, 5.0, 10.0]
+        return HStack(spacing: 8) {
+            ForEach(factors, id: \.self) { factor in
                 Button {
                     viewModel.setZoomFactor(factor)
                 } label: {

@@ -5,14 +5,51 @@ import Photos
 import SwiftUI
 import UIKit
 
-/// Central view model that manages camera session, frame analysis,
-/// photo/video capture, mode switching, and publishes all state for the UI.
+// MARK: - Thread-Safe Analysis State
+
+private final class AnalysisCoordinator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _mode: CameraMode = .photo
+    private var _isAlignmentOn: Bool = false
+    private var _lastAnalysisTime: CFAbsoluteTime = 0
+
+    var mode: CameraMode {
+        get { lock.withLock { _mode } }
+        set { lock.withLock { _mode = newValue } }
+    }
+
+    var isAlignmentOn: Bool {
+        get { lock.withLock { _isAlignmentOn } }
+        set { lock.withLock { _isAlignmentOn = newValue } }
+    }
+
+    func shouldAnalyze(now: CFAbsoluteTime, interval: CFTimeInterval) -> Bool {
+        lock.withLock {
+            if now - _lastAnalysisTime >= interval {
+                _lastAnalysisTime = now
+                return true
+            }
+            return false
+        }
+    }
+}
+
+// MARK: - CameraViewModel
+
 @MainActor
 final class CameraViewModel: NSObject, ObservableObject {
 
     // MARK: - App Mode
 
-    @Published var currentMode: CameraMode = .photo
+    @Published var currentMode: CameraMode = .photo {
+        didSet {
+            analysisCoordinator.mode = currentMode
+        }
+    }
+
+    // MARK: - Hardware Capabilities
+
+    @Published var supportsUltraWide: Bool = false
 
     // MARK: - Published State (Composition Analysis)
 
@@ -35,7 +72,11 @@ final class CameraViewModel: NSObject, ObservableObject {
     @Published var isLowLight: Bool = false
 
     // UI State
-    @Published var isAlignmentModeOn: Bool = false
+    @Published var isAlignmentModeOn: Bool = false {
+        didSet {
+            analysisCoordinator.isAlignmentOn = isAlignmentModeOn
+        }
+    }
     @Published var isCameraAuthorized: Bool = false
     @Published var showCapturedPhoto: Bool = false
 
@@ -48,6 +89,7 @@ final class CameraViewModel: NSObject, ObservableObject {
 
     // Timer countdown
     @Published var timerCountdown: Int? = nil
+    private var countdownTask: Task<Void, Never>?
 
     // Video Recording
     @Published var videoRecorder: VideoRecorder
@@ -71,20 +113,24 @@ final class CameraViewModel: NSObject, ObservableObject {
     nonisolated private let sessionQueue = DispatchQueue(label: "com.aicompose.camera.session")
     nonisolated private let analysisQueue = DispatchQueue(label: "com.aicompose.camera.analysis", qos: .userInitiated)
 
+    // MARK: - Thread-safe Analysis Coordinator
+
+    nonisolated private let analysisCoordinator = AnalysisCoordinator()
+
     // MARK: - Cancellables
 
     private var cancellables = Set<AnyCancellable>()
 
-    // MARK: - Throttling
+    // MARK: - Throttling Intervals
 
-    private var lastAnalysisTime: CFAbsoluteTime = 0
-    private let compositionThrottleInterval: CFTimeInterval = 0.6
-    private let alignmentThrottleInterval: CFTimeInterval = 0.3
+    nonisolated private let compositionThrottleInterval: CFTimeInterval = 0.5
+    nonisolated private let alignmentThrottleInterval: CFTimeInterval = 0.25
 
     // MARK: - Device
 
     private var currentDevice: AVCaptureDevice?
     private var currentInput: AVCaptureDeviceInput?
+    private var isUsingUltraWide: Bool = false
 
     // MARK: - Init
 
@@ -92,6 +138,9 @@ final class CameraViewModel: NSObject, ObservableObject {
         let output = movieOutput
         self.videoRecorder = VideoRecorder(movieOutput: output)
         super.init()
+
+        // Check ultra-wide hardware availability
+        self.supportsUltraWide = AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back) != nil
 
         videoRecorder.objectWillChange
             .sink { [weak self] _ in
@@ -130,6 +179,7 @@ final class CameraViewModel: NSObject, ObservableObject {
 
     /// Stop the capture session.
     func stop() {
+        countdownTask?.cancel()
         sessionQueue.async { [weak self] in
             self?.captureSession.stopRunning()
         }
@@ -137,28 +187,127 @@ final class CameraViewModel: NSObject, ObservableObject {
 
     /// Apply the suggested zoom factor to the camera device.
     func applyZoom() {
-        guard let device = currentDevice, let zoom = suggestedZoom else { return }
-        setZoomFactor(zoom, on: device)
+        guard let zoom = suggestedZoom else { return }
+        setZoomFactor(zoom)
     }
 
-    /// Set a specific zoom factor.
+    /// Set a specific zoom factor (0.5x, 1x, 2x, 5x, 10x).
     func setZoomFactor(_ factor: CGFloat) {
-        guard let device = currentDevice else { return }
-        setZoomFactor(factor, on: device)
+        if factor <= 0.75 {
+            // Ultra-wide lens requested
+            switchToUltraWide()
+        } else {
+            // Standard wide lens requested with digital zoom
+            switchToWide(zoomFactor: factor)
+        }
     }
 
-    private func setZoomFactor(_ factor: CGFloat, on device: AVCaptureDevice) {
-        let clamped = min(max(factor, 1.0), device.activeFormat.videoMaxZoomFactor)
-        sessionQueue.async {
-            do {
-                try device.lockForConfiguration()
-                device.videoZoomFactor = clamped
-                device.unlockForConfiguration()
+    private func switchToUltraWide() {
+        guard cameraPosition == .back else { return }
+        guard let ultraWideDevice = AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back) else {
+            // Fallback: stay on current device
+            return
+        }
+
+        if isUsingUltraWide && currentDevice?.deviceType == .builtInUltraWideCamera {
+            currentZoomFactor = 0.5
+            return
+        }
+
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.captureSession.beginConfiguration()
+
+            // Remove existing video inputs
+            for input in self.captureSession.inputs {
+                if let devInput = input as? AVCaptureDeviceInput, devInput.device.hasMediaType(.video) {
+                    self.captureSession.removeInput(devInput)
+                }
+            }
+
+            guard let newInput = try? AVCaptureDeviceInput(device: ultraWideDevice) else {
+                self.captureSession.commitConfiguration()
+                return
+            }
+
+            if self.captureSession.canAddInput(newInput) {
+                self.captureSession.addInput(newInput)
+            }
+
+            self.configureOutputOrientations()
+            self.captureSession.commitConfiguration()
+
+            Task { @MainActor [weak self] in
+                self?.currentDevice = ultraWideDevice
+                self?.currentInput = newInput
+                self?.isUsingUltraWide = true
+                self?.currentZoomFactor = 0.5
+            }
+        }
+    }
+
+    private func switchToWide(zoomFactor: CGFloat) {
+        let wideDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: cameraPosition)
+        guard let device = wideDevice else { return }
+
+        let needsDeviceSwitch = isUsingUltraWide || currentDevice != device
+
+        if needsDeviceSwitch {
+            sessionQueue.async { [weak self] in
+                guard let self = self else { return }
+                self.captureSession.beginConfiguration()
+
+                // Remove existing video inputs
+                for input in self.captureSession.inputs {
+                    if let devInput = input as? AVCaptureDeviceInput, devInput.device.hasMediaType(.video) {
+                        self.captureSession.removeInput(devInput)
+                    }
+                }
+
+                guard let newInput = try? AVCaptureDeviceInput(device: device) else {
+                    self.captureSession.commitConfiguration()
+                    return
+                }
+
+                if self.captureSession.canAddInput(newInput) {
+                    self.captureSession.addInput(newInput)
+                }
+
+                self.configureOutputOrientations()
+
+                // Apply zoom factor
+                let clamped = min(max(zoomFactor, 1.0), device.activeFormat.videoMaxZoomFactor)
+                do {
+                    try device.lockForConfiguration()
+                    device.videoZoomFactor = clamped
+                    device.unlockForConfiguration()
+                } catch {
+                    print("[CameraVM] Zoom configuration error: \(error)")
+                }
+
+                self.captureSession.commitConfiguration()
+
                 Task { @MainActor [weak self] in
+                    self?.currentDevice = device
+                    self?.currentInput = newInput
+                    self?.isUsingUltraWide = false
                     self?.currentZoomFactor = clamped
                 }
-            } catch {
-                print("[CameraVM] Zoom error: \(error)")
+            }
+        } else {
+            // Same device, just update zoom factor
+            let clamped = min(max(zoomFactor, 1.0), device.activeFormat.videoMaxZoomFactor)
+            sessionQueue.async { [weak self] in
+                do {
+                    try device.lockForConfiguration()
+                    device.videoZoomFactor = clamped
+                    device.unlockForConfiguration()
+                    Task { @MainActor [weak self] in
+                        self?.currentZoomFactor = clamped
+                    }
+                } catch {
+                    print("[CameraVM] Zoom error: \(error)")
+                }
             }
         }
     }
@@ -183,17 +332,20 @@ final class CameraViewModel: NSObject, ObservableObject {
     func flipCamera() {
         let newPosition: AVCaptureDevice.Position = (cameraPosition == .back) ? .front : .back
         cameraPosition = newPosition
+        supportsUltraWide = (newPosition == .back) && (AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back) != nil)
 
         sessionQueue.async { [weak self] in
-            guard let self else { return }
+            guard let self = self else { return }
             self.captureSession.beginConfiguration()
 
-            // Remove current input
-            if let currentInput = self.captureSession.inputs.first as? AVCaptureDeviceInput {
-                self.captureSession.removeInput(currentInput)
+            // Remove ONLY video inputs, leaving audio input intact!
+            for input in self.captureSession.inputs {
+                if let devInput = input as? AVCaptureDeviceInput, devInput.device.hasMediaType(.video) {
+                    self.captureSession.removeInput(devInput)
+                }
             }
 
-            // Add new input
+            // Add new video input
             let deviceType: AVCaptureDevice.DeviceType = .builtInWideAngleCamera
             guard let device = AVCaptureDevice.default(deviceType, for: .video, position: newPosition),
                   let input = try? AVCaptureDeviceInput(device: device) else {
@@ -205,11 +357,13 @@ final class CameraViewModel: NSObject, ObservableObject {
                 self.captureSession.addInput(input)
             }
 
+            self.configureOutputOrientations()
             self.captureSession.commitConfiguration()
 
             Task { @MainActor [weak self] in
                 self?.currentDevice = device
                 self?.currentInput = input
+                self?.isUsingUltraWide = false
                 self?.currentZoomFactor = 1.0
             }
         }
@@ -234,31 +388,28 @@ final class CameraViewModel: NSObject, ObservableObject {
     /// Capture a photo with optional timer delay.
     func capturePhoto() {
         if timerDuration != .off && timerCountdown == nil {
-            // Start countdown
-            timerCountdown = timerDuration.seconds
-            startTimerCountdown()
+            startTimerCountdown(seconds: timerDuration.seconds)
             return
         }
         doCapture()
     }
 
-    private func startTimerCountdown() {
-        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
-            Task { @MainActor [weak self] in
-                guard let self else {
-                    timer.invalidate()
-                    return
-                }
-                if let current = self.timerCountdown {
-                    if current <= 1 {
-                        timer.invalidate()
-                        self.timerCountdown = nil
-                        self.doCapture()
-                    } else {
-                        self.timerCountdown = current - 1
-                    }
-                }
+    private func startTimerCountdown(seconds: Int) {
+        countdownTask?.cancel()
+        countdownTask = Task { @MainActor [weak self] in
+            guard let self = self else { return }
+            self.timerCountdown = seconds
+
+            for remaining in stride(from: seconds - 1, through: 1, by: -1) {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                self.timerCountdown = remaining
             }
+
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            self.timerCountdown = nil
+            self.doCapture()
         }
     }
 
@@ -297,9 +448,6 @@ final class CameraViewModel: NSObject, ObservableObject {
 
         let settings = AVCapturePhotoSettings()
         settings.flashMode = .off
-
-        // We'll use a special flag to know this is a panorama capture
-        // For simplicity, we capture via the photo output and handle in delegate
         photoOutput.capturePhoto(with: settings, delegate: self)
     }
 
@@ -340,57 +488,69 @@ final class CameraViewModel: NSObject, ObservableObject {
 
     private func configureSession() {
         sessionQueue.async { [weak self] in
-            guard let self else { return }
+            guard let self = self else { return }
             self.captureSession.beginConfiguration()
-            if captureSession.canSetSessionPreset(.high) {
-                captureSession.sessionPreset = .high
+
+            if self.captureSession.canSetSessionPreset(.high) {
+                self.captureSession.sessionPreset = .high
             } else {
-                captureSession.sessionPreset = .photo
+                self.captureSession.sessionPreset = .photo
             }
 
             // Audio input for video recording
             if let audioDevice = AVCaptureDevice.default(for: .audio),
                let audioInput = try? AVCaptureDeviceInput(device: audioDevice) {
-                if captureSession.canAddInput(audioInput) {
-                    captureSession.addInput(audioInput)
+                if self.captureSession.canAddInput(audioInput) {
+                    self.captureSession.addInput(audioInput)
                 }
             }
 
-            // Video input — back wide camera
+            // Video input — back wide camera initially
             guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
                   let input = try? AVCaptureDeviceInput(device: device) else {
-                captureSession.commitConfiguration()
+                self.captureSession.commitConfiguration()
                 return
             }
 
-            if captureSession.canAddInput(input) {
-                captureSession.addInput(input)
+            if self.captureSession.canAddInput(input) {
+                self.captureSession.addInput(input)
             }
 
             Task { @MainActor [weak self] in
                 self?.currentDevice = device
                 self?.currentInput = input
+                self?.isUsingUltraWide = false
             }
 
-            // Video data output (for frame analysis)
-            videoDataOutput.setSampleBufferDelegate(self, queue: analysisQueue)
-            videoDataOutput.alwaysDiscardsLateVideoFrames = true
-            if captureSession.canAddOutput(videoDataOutput) {
-                captureSession.addOutput(videoDataOutput)
+            // Video data output (for real-time AI frame analysis)
+            self.videoDataOutput.setSampleBufferDelegate(self, queue: self.analysisQueue)
+            self.videoDataOutput.alwaysDiscardsLateVideoFrames = true
+            if self.captureSession.canAddOutput(self.videoDataOutput) {
+                self.captureSession.addOutput(self.videoDataOutput)
             }
 
             // Photo output
-            if captureSession.canAddOutput(photoOutput) {
-                captureSession.addOutput(photoOutput)
+            if self.captureSession.canAddOutput(self.photoOutput) {
+                self.captureSession.addOutput(self.photoOutput)
             }
 
             // Video recorder output
-            if captureSession.canAddOutput(movieOutput) {
-                captureSession.addOutput(movieOutput)
+            if self.captureSession.canAddOutput(self.movieOutput) {
+                self.captureSession.addOutput(self.movieOutput)
             }
 
-            captureSession.commitConfiguration()
-            captureSession.startRunning()
+            self.configureOutputOrientations()
+            self.captureSession.commitConfiguration()
+            self.captureSession.startRunning()
+        }
+    }
+
+    nonisolated private func configureOutputOrientations() {
+        if let videoConnection = videoDataOutput.connection(with: .video), videoConnection.isVideoOrientationSupported {
+            videoConnection.videoOrientation = .portrait
+        }
+        if let movieConnection = movieOutput.connection(with: .video), movieConnection.isVideoOrientationSupported {
+            movieConnection.videoOrientation = .portrait
         }
     }
 }
@@ -406,76 +566,45 @@ extension CameraViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
     ) {
         let now = CFAbsoluteTimeGetCurrent()
 
+        // 1. Thread-safe fast check: mode and throttling
+        guard analysisCoordinator.mode == .photo else { return }
+
+        let isAlignment = analysisCoordinator.isAlignmentOn
+        let interval = isAlignment ? alignmentThrottleInterval : compositionThrottleInterval
+
+        guard analysisCoordinator.shouldAnalyze(now: now, interval: interval) else { return }
+
+        // 2. Synchronously obtain pixel buffer while sample buffer is guaranteed valid
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
 
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-
-            // Only analyze in photo mode
-            guard self.currentMode == .photo else { return }
-
-            let alignmentMode = self.isAlignmentModeOn
-            let lastTime = self.lastAnalysisTime
-
-            if alignmentMode {
-                guard now - lastTime >= self.alignmentThrottleInterval else { return }
-                self.lastAnalysisTime = now
-                self.runAlignmentAnalysis(ciImage: ciImage)
-            } else {
-                guard now - lastTime >= self.compositionThrottleInterval else { return }
-                self.lastAnalysisTime = now
-                self.isAnalyzing = true
-                self.runCompositionAnalysis(ciImage: ciImage)
-                self.runFilterAnalysis(ciImage: ciImage)
-            }
-        }
-    }
-}
-
-// MARK: - Analysis Dispatchers
-
-extension CameraViewModel {
-
-    private func runCompositionAnalysis(ciImage: CIImage) {
-        let queue = analysisQueue
-        queue.async { [weak self] in
-            CompositionAnalyzer.analyze(ciImage: ciImage) { result in
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    self.suggestedBox = result.saliencyBox
-                    self.suggestedZoom = result.suggestedZoom
-                    self.isAnalyzing = false
-                }
-            }
-        }
-    }
-
-    private func runFilterAnalysis(ciImage: CIImage) {
-        let ctx = ciContext
-        let queue = analysisQueue
-        queue.async { [weak self] in
-            let recommendation = SceneFilterRecommender.recommend(for: ciImage, context: ctx)
+        // 3. Process on analysisQueue directly (no task deferral!)
+        if isAlignment {
+            let guidance = AlignmentGuide.evaluate(pixelBuffer: pixelBuffer, orientation: .up)
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self = self else { return }
+                self.targetCompositionPoint = guidance.targetPoint
+                self.currentSubjectPoint = guidance.currentSubjectPoint
+                self.isAligned = guidance.isAligned
+                self.alignmentInstruction = guidance.instruction
+            }
+        } else {
+            Task { @MainActor [weak self] in
+                self?.isAnalyzing = true
+            }
+
+            let composition = CompositionAnalyzer.analyze(pixelBuffer: pixelBuffer, orientation: .up)
+            let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+            let recommendation = SceneFilterRecommender.recommend(for: ciImage, context: self.ciContext)
+
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                self.suggestedBox = composition.saliencyBox
+                self.suggestedZoom = composition.suggestedZoom
                 self.sceneDescription = recommendation.sceneDescription
                 self.filterName = recommendation.filterName
                 self.filterReason = recommendation.reason
-                self.isLowLight = recommendation.filterName == "Night Boost"
-            }
-        }
-    }
-
-    private func runAlignmentAnalysis(ciImage: CIImage) {
-        analysisQueue.async { [weak self] in
-            AlignmentGuide.evaluate(ciImage: ciImage) { guidance in
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    self.targetCompositionPoint = guidance.targetPoint
-                    self.currentSubjectPoint = guidance.currentSubjectPoint
-                    self.isAligned = guidance.isAligned
-                    self.alignmentInstruction = guidance.instruction
-                }
+                self.isLowLight = (recommendation.filterName == "Night Boost")
+                self.isAnalyzing = false
             }
         }
     }
@@ -498,7 +627,7 @@ extension CameraViewModel: AVCapturePhotoCaptureDelegate {
         }
 
         Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self = self else { return }
 
             // Check if this is a panorama capture
             if self.currentMode == .panorama {

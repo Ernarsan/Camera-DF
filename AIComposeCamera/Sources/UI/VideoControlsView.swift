@@ -7,6 +7,7 @@ struct VideoControlsView: View {
     let recordingDuration: TimeInterval
     let currentZoom: CGFloat
     let flashEnabled: Bool
+    var supportsUltraWide: Bool = true
     let onToggleRecording: () -> Void
     let onFlipCamera: () -> Void
     let onToggleFlash: () -> Void
@@ -107,8 +108,9 @@ struct VideoControlsView: View {
     // MARK: - Zoom Chips
 
     private var zoomChips: some View {
-        HStack(spacing: 8) {
-            ForEach([0.5, 1.0, 2.0, 5.0], id: \.self) { factor in
+        let factors: [CGFloat] = supportsUltraWide ? [0.5, 1.0, 2.0, 5.0] : [1.0, 2.0, 5.0]
+        return HStack(spacing: 8) {
+            ForEach(factors, id: \.self) { factor in
                 Button {
                     onZoomTap(factor)
                 } label: {
