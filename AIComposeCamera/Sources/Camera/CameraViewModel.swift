@@ -366,7 +366,7 @@ final class CameraViewModel: NSObject, ObservableObject {
                 self.captureSession.addInput(input)
             }
 
-            self.configureOutputOrientations()
+            self.configureOutputOrientations(isFront: newPosition == .front)
             self.captureSession.commitConfiguration()
 
             Task { @MainActor [weak self] in
@@ -554,12 +554,18 @@ final class CameraViewModel: NSObject, ObservableObject {
         }
     }
 
-    nonisolated private func configureOutputOrientations() {
+    nonisolated private func configureOutputOrientations(isFront: Bool = false) {
         if let videoConnection = videoDataOutput.connection(with: .video), videoConnection.isVideoOrientationSupported {
             videoConnection.videoOrientation = .portrait
+            if videoConnection.isVideoMirroringSupported {
+                videoConnection.isVideoMirrored = isFront
+            }
         }
         if let movieConnection = movieOutput.connection(with: .video), movieConnection.isVideoOrientationSupported {
             movieConnection.videoOrientation = .portrait
+            if movieConnection.isVideoMirroringSupported {
+                movieConnection.isVideoMirrored = isFront
+            }
         }
     }
 }
@@ -607,7 +613,24 @@ extension CameraViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
 
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
-                self.suggestedBox = composition.saliencyBox
+
+                // Smooth bounding box tracking (EMA)
+                if let newBox = composition.saliencyBox {
+                    if let oldBox = self.suggestedBox {
+                        let alpha: CGFloat = 0.45
+                        self.suggestedBox = CGRect(
+                            x: oldBox.origin.x * (1 - alpha) + newBox.origin.x * alpha,
+                            y: oldBox.origin.y * (1 - alpha) + newBox.origin.y * alpha,
+                            width: oldBox.width * (1 - alpha) + newBox.width * alpha,
+                            height: oldBox.height * (1 - alpha) + newBox.height * alpha
+                        )
+                    } else {
+                        self.suggestedBox = newBox
+                    }
+                } else {
+                    self.suggestedBox = nil
+                }
+
                 self.suggestedZoom = composition.suggestedZoom
                 self.sceneDescription = recommendation.sceneDescription
                 self.filterName = recommendation.filterName

@@ -256,6 +256,14 @@ struct ContentView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
+            if !viewModel.filterName.isEmpty && !viewModel.isAnalyzing && !viewModel.isAlignmentModeOn {
+                SuggestionBubbleView.filterRecommendation(
+                    name: viewModel.filterName,
+                    reason: viewModel.filterReason
+                )
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             if viewModel.isAlignmentModeOn && !viewModel.alignmentInstruction.isEmpty {
                 SuggestionBubbleView.alignment(instruction: viewModel.alignmentInstruction)
                     .transition(.move(edge: .top).combined(with: .opacity))
@@ -276,6 +284,7 @@ struct ContentView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: viewModel.isAnalyzing)
+        .animation(.easeInOut(duration: 0.3), value: viewModel.filterName)
         .animation(.easeInOut(duration: 0.3), value: viewModel.alignmentInstruction)
     }
 
