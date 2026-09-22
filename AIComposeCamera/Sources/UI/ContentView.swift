@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Main screen: full-screen camera preview with multi-mode UI (Photo, Video, 360° Panorama),
-/// AI overlays, smart suggestions, grid, timer, flash controls, and external storage export.
+/// authentic Y2K CCD retro camera viewfinder HUD, 7 camera profiles, AI overlays, and USB export.
 struct ContentView: View {
 
     @StateObject private var viewModel = CameraViewModel()
@@ -47,13 +47,12 @@ struct ContentView: View {
                 if viewModel.showCapturedPhoto, let image = viewModel.capturedImage {
                     PhotoPreviewView(
                         image: image,
-                        filterName: viewModel.filterName,
+                        filterName: viewModel.selectedCamera.displayName,
                         onDismiss: {
                             viewModel.showCapturedPhoto = false
                             viewModel.capturedImage = nil
                         },
                         onSave: {
-                            // Already auto-saved, but can provide feedback
                             let generator = UINotificationFeedbackGenerator()
                             generator.notificationOccurred(.success)
                         },
@@ -97,6 +96,17 @@ struct ContentView: View {
     @ViewBuilder
     private func photoModeOverlay(size: CGSize) -> some View {
         ZStack {
+            // Retro LCD Viewfinder HUD (battery, frame counter, aspect ratio, glowing date stamp)
+            RetroViewfinderHUD(
+                camera: viewModel.selectedCamera,
+                aspectRatio: viewModel.selectedAspectRatio,
+                isDateStampOn: viewModel.isDateStampEnabled,
+                isGrainOn: viewModel.isGrainEnabled,
+                photoCount: viewModel.sessionPhotoCount,
+                flashMode: viewModel.flashMode,
+                containerSize: size
+            )
+
             // Alignment Mode Border
             if viewModel.isAlignmentModeOn {
                 alignmentBorder(size: size)
@@ -119,18 +129,21 @@ struct ContentView: View {
 
             // Controls Stack
             VStack {
-                // Top: Controls (Flash, HDR, Timer, Grid)
+                // Top: Controls (Flash, Ratio, Date, Grain, Timer, Grid)
                 TopControlsView(
                     flashMode: $viewModel.flashMode,
                     isHDR: $viewModel.isHDR,
                     timerDuration: $viewModel.timerDuration,
-                    showGrid: $viewModel.showGrid
+                    showGrid: $viewModel.showGrid,
+                    aspectRatio: $viewModel.selectedAspectRatio,
+                    isDateStampEnabled: $viewModel.isDateStampEnabled,
+                    isGrainEnabled: $viewModel.isGrainEnabled
                 )
                 .padding(.top, 50)
 
                 // Top AI Suggestion Bubbles
                 topBubbles()
-                    .padding(.top, 8)
+                    .padding(.top, 6)
 
                 Spacer()
 
@@ -141,26 +154,30 @@ struct ContentView: View {
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "plus.magnifyingglass")
-                            Text("Zoom to \(Int(zoom))x")
+                            Text("AI Zoom \(Int(zoom))x")
                                 .fontWeight(.semibold)
                         }
-                        .font(.system(size: 14))
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 8)
-                        .background(Capsule().fill(Color.blue.opacity(0.8)))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 7)
+                        .background(Capsule().fill(Color.blue.opacity(0.85)))
                     }
                     .transition(.scale.combined(with: .opacity))
-                    .padding(.bottom, 10)
+                    .padding(.bottom, 6)
                 }
+
+                // Retro Camera Selector Carousel (CCD, G7X, NOKIA, LOMO, XT30, DV, POLA)
+                CameraWheelPickerView(selectedCamera: $viewModel.selectedCamera)
+                    .padding(.bottom, 10)
 
                 // Zoom Factors Row (0.5x, 1x, 2x, 5x, 10x)
                 zoomRow
-                    .padding(.bottom, 16)
+                    .padding(.bottom, 14)
 
                 // Shutter Row (Gallery counter, Shutter, AI toggle, Flip)
                 photoControlRow
-                    .padding(.bottom, 14)
+                    .padding(.bottom, 12)
 
                 // Mode Picker (PHOTO | VIDEO | 360°)
                 ModePickerView(selectedMode: $viewModel.currentMode)
@@ -239,14 +256,6 @@ struct ContentView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            if !viewModel.filterName.isEmpty && !viewModel.isAnalyzing && !viewModel.isAlignmentModeOn {
-                SuggestionBubbleView.filterRecommendation(
-                    name: viewModel.filterName,
-                    reason: viewModel.filterReason
-                )
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
             if viewModel.isAlignmentModeOn && !viewModel.alignmentInstruction.isEmpty {
                 SuggestionBubbleView.alignment(instruction: viewModel.alignmentInstruction)
                     .transition(.move(edge: .top).combined(with: .opacity))
@@ -257,7 +266,7 @@ struct ContentView: View {
                     Image(systemName: "moon.stars.fill")
                         .font(.system(size: 12))
                         .foregroundColor(.yellow)
-                    Text("Night Boost active")
+                    Text("Night Boost Active")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.white)
                 }
@@ -267,7 +276,6 @@ struct ContentView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: viewModel.isAnalyzing)
-        .animation(.easeInOut(duration: 0.3), value: viewModel.filterName)
         .animation(.easeInOut(duration: 0.3), value: viewModel.alignmentInstruction)
     }
 
@@ -292,7 +300,7 @@ struct ContentView: View {
                         .background(
                             Capsule().fill(
                                 abs(viewModel.currentZoomFactor - factor) < 0.1
-                                    ? Color.yellow.opacity(0.85)
+                                    ? viewModel.selectedCamera.accentColor
                                     : Color.white.opacity(0.12)
                             )
                         )
@@ -321,14 +329,14 @@ struct ContentView: View {
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.white)
                         .padding(4)
-                        .background(Circle().fill(Color.blue))
+                        .background(Circle().fill(viewModel.selectedCamera.accentColor))
                         .offset(x: 14, y: -14)
                 }
             }
 
             Spacer()
 
-            // Shutter button
+            // Shutter button (Mechanical styling with camera accent color)
             shutterButton()
 
             Spacer()
@@ -364,31 +372,33 @@ struct ContentView: View {
             viewModel.capturePhoto()
         } label: {
             ZStack {
+                // Outer chrome ring
                 Circle()
                     .stroke(
                         viewModel.isAligned && viewModel.isAlignmentModeOn
                             ? Color.green
-                            : Color.white,
+                            : Color.white.opacity(0.85),
                         lineWidth: 4
                     )
                     .frame(width: 74, height: 74)
 
+                // Inner tactile button
                 Circle()
                     .fill(
                         viewModel.isAlignmentModeOn
                             ? (viewModel.isAligned ? Color.green : Color.yellow)
-                            : Color.white
+                            : viewModel.selectedCamera.accentColor
                     )
-                    .frame(width: 60, height: 60)
+                    .frame(width: 58, height: 58)
+                    .shadow(color: viewModel.selectedCamera.accentColor.opacity(0.6), radius: 6)
+
+                // Retro shutter concentric detail
+                Circle()
+                    .stroke(Color.white.opacity(0.4), lineWidth: 1.5)
+                    .frame(width: 46, height: 46)
             }
         }
         .scaleEffect(viewModel.isAligned && viewModel.isAlignmentModeOn ? 1.08 : 1.0)
-        .shadow(
-            color: viewModel.isAligned && viewModel.isAlignmentModeOn
-                ? Color.green.opacity(0.7)
-                : .clear,
-            radius: 12
-        )
         .animation(
             viewModel.isAligned
                 ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true)

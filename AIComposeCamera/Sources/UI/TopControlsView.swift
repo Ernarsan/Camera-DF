@@ -1,15 +1,18 @@
 import SwiftUI
 
-/// Top control bar with Flash / HDR / Timer / Grid / Settings controls.
+/// Top control bar with Flash / Aspect Ratio / Date Stamp / Grain / Timer / Grid controls.
 struct TopControlsView: View {
 
     @Binding var flashMode: FlashMode
     @Binding var isHDR: Bool
     @Binding var timerDuration: TimerDuration
     @Binding var showGrid: Bool
+    @Binding var aspectRatio: AspectRatioMode
+    @Binding var isDateStampEnabled: Bool
+    @Binding var isGrainEnabled: Bool
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 10) {
             // Flash Toggle
             Button {
                 flashMode = flashMode.next
@@ -18,30 +21,63 @@ struct TopControlsView: View {
                     Circle()
                         .fill(.ultraThinMaterial)
                         .environment(\.colorScheme, .dark)
-                        .frame(width: 40, height: 40)
+                        .frame(width: 38, height: 38)
 
                     Image(systemName: flashMode.iconName)
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(flashMode.iconColor)
                 }
             }
 
-            // HDR Toggle
+            // Aspect Ratio Toggle (4:3, 1:1, 16:9)
             Button {
-                isHDR.toggle()
+                switch aspectRatio {
+                case .ratio4_3: aspectRatio = .ratio1_1
+                case .ratio1_1: aspectRatio = .ratio16_9
+                case .ratio16_9: aspectRatio = .ratio4_3
+                }
             } label: {
-                Text("HDR")
-                    .font(.system(size: 12, weight: .heavy))
-                    .foregroundColor(isHDR ? .black : .white.opacity(0.7))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
+                Text(aspectRatio.rawValue)
+                    .font(.system(size: 12, weight: .black, design: .monospaced))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
                     .background(
-                        Capsule()
-                            .fill(isHDR ? Color.yellow : Color.white.opacity(0.15))
+                        Capsule().fill(.ultraThinMaterial).environment(\.colorScheme, .dark)
+                    )
+            }
+
+            // Date Stamp Toggle (Y2K signature)
+            Button {
+                isDateStampEnabled.toggle()
+            } label: {
+                Text("DATE")
+                    .font(.system(size: 11, weight: .black, design: .monospaced))
+                    .foregroundColor(isDateStampEnabled ? Color(red: 1.0, green: 0.55, blue: 0.0) : .white.opacity(0.4))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 7)
+                    .background(
+                        Capsule().fill(isDateStampEnabled ? Color(red: 1.0, green: 0.55, blue: 0.0).opacity(0.2) : Color.white.opacity(0.08))
                     )
             }
 
             Spacer()
+
+            // Grain Toggle
+            Button {
+                isGrainEnabled.toggle()
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .environment(\.colorScheme, .dark)
+                        .frame(width: 38, height: 38)
+
+                    Image(systemName: "camera.filters")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(isGrainEnabled ? .orange : .white.opacity(0.5))
+                }
+            }
 
             // Timer
             Button {
@@ -51,17 +87,17 @@ struct TopControlsView: View {
                     Circle()
                         .fill(.ultraThinMaterial)
                         .environment(\.colorScheme, .dark)
-                        .frame(width: 40, height: 40)
+                        .frame(width: 38, height: 38)
 
                     Image(systemName: "timer")
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(timerDuration == .off ? .white : .yellow)
 
                     if timerDuration != .off {
                         Text("\(timerDuration.seconds)")
                             .font(.system(size: 8, weight: .black))
                             .foregroundColor(.yellow)
-                            .offset(x: 10, y: -10)
+                            .offset(x: 8, y: -8)
                     }
                 }
             }
@@ -74,15 +110,15 @@ struct TopControlsView: View {
                     Circle()
                         .fill(.ultraThinMaterial)
                         .environment(\.colorScheme, .dark)
-                        .frame(width: 40, height: 40)
+                        .frame(width: 38, height: 38)
 
                     Image(systemName: "grid")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(showGrid ? .cyan : .white)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(showGrid ? .cyan : .white.opacity(0.7))
                 }
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 14)
     }
 }
 

@@ -1,3 +1,4 @@
+import AudioToolbox
 import AVFoundation
 import Combine
 import CoreImage
@@ -50,6 +51,14 @@ final class CameraViewModel: NSObject, ObservableObject {
     // MARK: - Hardware Capabilities
 
     @Published var supportsUltraWide: Bool = false
+
+    // MARK: - Retro / Kapi Cam State
+
+    @Published var selectedCamera: RetroCameraProfile = .ccd
+    @Published var isDateStampEnabled: Bool = true
+    @Published var isGrainEnabled: Bool = true
+    @Published var selectedAspectRatio: AspectRatioMode = .ratio4_3
+    @Published var dateStyle: RetroDateStamper.DateStyle = .currentYear
 
     // MARK: - Published State (Composition Analysis)
 
@@ -635,11 +644,19 @@ extension CameraViewModel: AVCapturePhotoCaptureDelegate {
                 return
             }
 
-            // Standard photo flow
-            // 1. Apply recommended filter
-            var finalImage = SceneFilterRecommender.applyLastFilter(to: rawImage)
+            // Shutter sound & heavy tactile mechanical feedback
+            AudioServicesPlaySystemSound(1108)
+            let haptic = UIImpactFeedbackGenerator(style: .heavy)
+            haptic.impactOccurred()
 
-            // 2. Apply night enhancement if low light
+            // 1. Apply Retro Filter Engine (CCD / G7X / Nokia / Lomo / XT30 / DV / Pola)
+            var finalImage = RetroFilterEngine.shared.process(
+                image: rawImage,
+                profile: self.selectedCamera,
+                includeGrain: self.isGrainEnabled
+            )
+
+            // 2. Apply Night Boost if scene is dark
             if self.isLowLight {
                 let nightResult = NightEnhancer.enhanceIfNeeded(finalImage)
                 if nightResult.isLowLight, let enhanced = nightResult.enhancedImage {
@@ -647,12 +664,21 @@ extension CameraViewModel: AVCapturePhotoCaptureDelegate {
                 }
             }
 
-            // 3. Show captured image
+            // 3. Stamp Y2K Digital Date if enabled
+            if self.isDateStampEnabled {
+                finalImage = RetroDateStamper.stamp(
+                    image: finalImage,
+                    profile: self.selectedCamera,
+                    style: self.dateStyle
+                )
+            }
+
+            // 4. Show captured image in preview
             self.capturedImage = finalImage
             self.showCapturedPhoto = true
             self.sessionPhotoCount += 1
 
-            // 4. Save to Photos
+            // 5. Save to Photos
             self.saveToPhotoLibrary(finalImage)
         }
     }

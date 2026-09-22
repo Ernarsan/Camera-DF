@@ -11,3 +11,5 @@ expo-camera-app/
 OPTIMIZE_LAPTOP.bat
 optimize.ps1
 kali-linux-2026.2-virtualbox-amd64/
+scratch_kapi/
+*.ps1
