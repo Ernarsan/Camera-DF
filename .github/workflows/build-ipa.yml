@@ -15,14 +15,6 @@ jobs:
       - name: ⬇️ Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🛠️ Install XcodeGen
-        run: |
-          brew install xcodegen
-
-      - name: ⚙️ Generate Xcode Project
-        run: |
-          xcodegen generate
-
       - name: 📱 Select Xcode Version
         run: |
           for xcode in /Applications/Xcode_16*.app /Applications/Xcode*.app; do
@@ -35,12 +27,44 @@ jobs:
           xcodebuild -version
           swift -version
 
+      - name: 🛠️ Install XcodeGen
+        run: |
+          brew install xcodegen
+
+      - name: ⚙️ Generate Xcode Project
+        run: |
+          cd AIComposeCamera
+          xcodegen generate --spec project.yml
+          ls -la
+
+      - name: 🔧 Patch project.pbxproj for Unsigned Build
+        run: |
+          python3 -c "
+          import os
+
+          pbx_path = 'AIComposeCamera/AIComposeCamera.xcodeproj/project.pbxproj'
+          if os.path.exists(pbx_path):
+              with open(pbx_path, 'r', encoding='utf-8') as f:
+                  content = f.read()
+              
+              content = content.replace('CODE_SIGN_STYLE = Automatic;', 'CODE_SIGN_STYLE = Manual;')
+              content = content.replace('ProvisioningStyle = Automatic;', 'ProvisioningStyle = Manual;')
+              content = content.replace('CODE_SIGNING_ALLOWED = YES;', 'CODE_SIGNING_ALLOWED = NO;')
+              content = content.replace('buildSettings = {', 'buildSettings = {\n\t\t\t\tCODE_SIGNING_ALLOWED = NO;\n\t\t\t\tCODE_SIGNING_REQUIRED = NO;\n\t\t\t\tCODE_SIGN_IDENTITY = \"\";\n\t\t\t\tDEVELOPMENT_TEAM = \"\";\n\t\t\t\tPROVISIONING_PROFILE_SPECIFIER = \"\";')
+              
+              with open(pbx_path, 'w', encoding='utf-8') as f:
+                  f.write(content)
+              print('✅ project.pbxproj patched for unsigned build')
+          else:
+              print('⚠️ project.pbxproj not found at:', pbx_path)
+          "
+
       - name: ⚙️ Build Archive via Xcode (Real iPhone ARM64)
         run: |
           mkdir -p build
           set -o pipefail
           xcodebuild archive \
-            -project "AIComposeCamera.xcodeproj" \
+            -project "AIComposeCamera/AIComposeCamera.xcodeproj" \
             -scheme "AIComposeCamera" \
             -archivePath "build/AIComposeCamera.xcarchive" \
             -configuration Release \
