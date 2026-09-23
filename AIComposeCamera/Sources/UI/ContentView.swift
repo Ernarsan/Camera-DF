@@ -265,12 +265,17 @@ struct ContentView: View {
             }
 
             if viewModel.isAlignmentModeOn && !viewModel.alignmentInstruction.isEmpty {
-                SuggestionBubbleView.alignment(instruction: viewModel.alignmentInstruction)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                SuggestionBubbleView(
+                    text: viewModel.alignmentInstruction,
+                    subtitle: viewModel.alignmentSubtitle,
+                    icon: viewModel.isAligned ? "checkmark.seal.fill" : "viewfinder"
+                )
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .animation(.easeInOut(duration: 0.3), value: viewModel.isAnalyzing)
         .animation(.easeInOut(duration: 0.3), value: viewModel.alignmentInstruction)
+        .animation(.easeInOut(duration: 0.3), value: viewModel.alignmentSubtitle)
     }
 
     // MARK: - Zoom Row
@@ -505,22 +510,29 @@ struct ContentView: View {
         let screenPoint = visionToScreen(target, in: size)
 
         ZStack {
+            // Samsung Shot Suggestions outer ring (golden yellow on lock)
             Circle()
-                .stroke(Color.white.opacity(0.7), lineWidth: 1.5)
-                .frame(width: 42, height: 42)
+                .stroke(
+                    viewModel.isAligned ? Color.yellow : Color.white.opacity(0.75),
+                    lineWidth: viewModel.isAligned ? 3 : 1.5
+                )
+                .frame(width: 44, height: 44)
+                .scaleEffect(viewModel.isAligned ? 1.15 : 1.0)
+                .shadow(color: viewModel.isAligned ? Color.yellow.opacity(0.8) : Color.clear, radius: 8)
 
             Rectangle()
-                .fill(Color.white.opacity(0.5))
-                .frame(width: 1, height: 22)
+                .fill(viewModel.isAligned ? Color.yellow : Color.white.opacity(0.6))
+                .frame(width: 1.5, height: 22)
             Rectangle()
-                .fill(Color.white.opacity(0.5))
-                .frame(width: 22, height: 1)
+                .fill(viewModel.isAligned ? Color.yellow : Color.white.opacity(0.6))
+                .frame(width: 22, height: 1.5)
 
             Circle()
-                .fill(Color.white)
-                .frame(width: 6, height: 6)
+                .fill(viewModel.isAligned ? Color.yellow : Color.white)
+                .frame(width: 7, height: 7)
         }
         .position(x: screenPoint.x, y: screenPoint.y)
+        .animation(.easeInOut(duration: 0.25), value: viewModel.isAligned)
     }
 
     // MARK: - Subject Indicator
@@ -530,9 +542,9 @@ struct ContentView: View {
         let screenPoint = visionToScreen(subject, in: size)
 
         Circle()
-            .fill(viewModel.isAligned ? Color.green : Color.orange)
-            .frame(width: 12, height: 12)
-            .shadow(color: viewModel.isAligned ? .green : .orange, radius: 5)
+            .fill(viewModel.isAligned ? Color.yellow : Color.orange)
+            .frame(width: 14, height: 14)
+            .shadow(color: viewModel.isAligned ? Color.yellow : Color.orange, radius: 6)
             .position(x: screenPoint.x, y: screenPoint.y)
             .animation(.easeOut(duration: 0.15), value: subject.x)
             .animation(.easeOut(duration: 0.15), value: subject.y)

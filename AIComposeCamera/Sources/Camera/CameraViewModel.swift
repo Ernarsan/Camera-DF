@@ -63,7 +63,7 @@ final class CameraViewModel: NSObject, ObservableObject {
 
     // MARK: - Retro / Kapi Cam State
 
-    @Published var selectedCamera: RetroCameraProfile = .ccd
+    @Published var selectedCamera: RetroCameraProfile = .zeiss
     @Published var isDateStampEnabled: Bool = true
     @Published var isGrainEnabled: Bool = true
     @Published var selectedAspectRatio: AspectRatioMode = .ratio4_3
@@ -82,6 +82,7 @@ final class CameraViewModel: NSObject, ObservableObject {
     @Published var currentSubjectPoint: CGPoint?
     @Published var isAligned: Bool = false
     @Published var alignmentInstruction: String = ""
+    @Published var alignmentSubtitle: String? = nil
 
     // UI State
     @Published var isAlignmentModeOn: Bool = false {
@@ -340,7 +341,8 @@ final class CameraViewModel: NSObject, ObservableObject {
         AudioHapticEngine.shared.playHapticZoom()
         isAlignmentModeOn.toggle()
         if isAlignmentModeOn {
-            alignmentInstruction = "Ai Detecting the scene. Keep your phone still."
+            alignmentInstruction = "ИИ сканирует сцену. Держите телефон ровно"
+            alignmentSubtitle = "Samsung Shot Suggestions & Guided Frame"
             targetCompositionPoint = nil
             currentSubjectPoint = nil
             isAligned = false
@@ -363,6 +365,7 @@ final class CameraViewModel: NSObject, ObservableObject {
             currentSubjectPoint = nil
             isAligned = false
             alignmentInstruction = ""
+            alignmentSubtitle = nil
             
             // Restore continuous autofocus
             sessionQueue.async { [weak self] in
@@ -476,12 +479,13 @@ final class CameraViewModel: NSObject, ObservableObject {
         }
 
         if photoOutput.isHighResolutionCaptureEnabled {
-            settings.isHighResolutionPhotoEnabled = true
+            // Disabled high resolution photo capture to prevent memory exhaustion (OOM) at 5x/10x AI Zoom
+            settings.isHighResolutionPhotoEnabled = false
         }
         
         if #available(iOS 16.0, *) {
-            if let device = self.currentDevice, let maxDim = device.activeFormat.supportedMaxPhotoDimensions.last {
-                settings.maxPhotoDimensions = maxDim
+            if let device = self.currentDevice, let _ = device.activeFormat.supportedMaxPhotoDimensions.last {
+                // Do not request maxPhotoDimensions (e.g. 48MP) to prevent crash
             }
         }
 
@@ -538,7 +542,8 @@ final class CameraViewModel: NSObject, ObservableObject {
 
     /// Export image data to external storage via UIDocumentPickerViewController.
     func exportToExternal(image: UIImage) {
-        guard let data = image.jpegData(compressionQuality: 0.92) else { return }
+        // Reduced compression quality to 0.6 to keep the file size around 2MB as requested
+        guard let data = image.jpegData(compressionQuality: 0.6) else { return }
 
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("AIComposeCamera_\(Int(Date().timeIntervalSince1970)).jpg")
@@ -753,20 +758,27 @@ extension CameraViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
                     self.isAligned = distance < 0.085
                     
                     if self.isAligned {
-                        self.alignmentInstruction = "✦ Perfect Composition ✦"
+                        self.alignmentInstruction = "✦ Идеальный ракурс (Shot Suggestion) ✦"
+                        self.alignmentSubtitle = guidance.coachingTip ?? "Золотое сечение зафиксировано"
                         if !wasAligned {
                             AudioHapticEngine.shared.playHapticAlignment(isAligned: true)
                         }
                     } else {
                         if abs(dx) > abs(dy) {
-                            self.alignmentInstruction = dx > 0 ? "Move right →" : "← Move left"
+                            self.alignmentInstruction = dx > 0 ? "Сместите вправо →" : "← Сместите влево"
                         } else {
-                            self.alignmentInstruction = dy > 0 ? "Move up ↑" : "↓ Move down"
+                            self.alignmentInstruction = dy > 0 ? "Поднимите камеру выше ↑" : "↓ Опустите камеру ниже"
                         }
+                        self.alignmentSubtitle = guidance.coachingTip
                     }
                 } else {
                     self.isAligned = false
-                    self.alignmentInstruction = "Aim at subject to align composition"
+                    self.alignmentInstruction = "Наведите на объект для авто-ракурса"
+                    self.alignmentSubtitle = guidance.coachingTip
+                }
+
+                if let zoom = guidance.suggestedZoom, self.currentZoomFactor < 1.5 {
+                    self.suggestedZoom = zoom
                 }
 
                 self.analysisCoordinator.isInferenceRunning = false
