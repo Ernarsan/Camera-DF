@@ -26,6 +26,8 @@ public final class VideoRecorder: NSObject, ObservableObject {
     public func startRecording() {
         guard !movieOutput.isRecording else { return }
         
+        AudioHapticEngine.shared.playRecordStartSound()
+        
         let tempDirectory = FileManager.default.temporaryDirectory
         let fileName = "video_\(UUID().uuidString).mov"
         let fileURL = tempDirectory.appendingPathComponent(fileName)
@@ -40,6 +42,7 @@ public final class VideoRecorder: NSObject, ObservableObject {
     
     public func stopRecording() {
         guard movieOutput.isRecording else { return }
+        AudioHapticEngine.shared.playRecordStopSound()
         movieOutput.stopRecording()
         
         Task { @MainActor in

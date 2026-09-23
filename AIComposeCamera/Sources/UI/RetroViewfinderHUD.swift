@@ -9,7 +9,12 @@ struct RetroViewfinderHUD: View {
     let isGrainOn: Bool
     let photoCount: Int
     let flashMode: FlashMode
+    let isRecording: Bool
+    let recordingDuration: TimeInterval
+    let aiFilterRecommendation: String
     let containerSize: CGSize
+    
+    @State private var blinkToggle: Bool = false
 
     var body: some View {
         ZStack {
@@ -20,49 +25,81 @@ struct RetroViewfinderHUD: View {
             VStack {
                 // Top LCD Status Bar
                 HStack(spacing: 12) {
-                    // Battery indicator
-                    HStack(spacing: 3) {
-                        Image(systemName: "battery.75")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(.green)
+                    if isRecording {
+                        // Blinking REC Indicator
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 8, height: 8)
+                                .opacity(blinkToggle ? 1.0 : 0.2)
+                            
+                            Text("REC")
+                                .font(.system(size: 12, weight: .black, design: .monospaced))
+                                .foregroundColor(.red)
+                            
+                            Text(formatDuration(recordingDuration))
+                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white)
+                                .padding(.leading, 4)
+                        }
+                    } else {
+                        // Battery indicator
+                        HStack(spacing: 3) {
+                            Image(systemName: "battery.75")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(.green)
+                        }
+
+                        // Remaining shots / frame count
+                        Text(String(format: "[%03d]", max(0, 999 - photoCount)))
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(.yellow)
+
+                        // Sensor / Format badge
+                        Text(camera.rawValue)
+                            .font(.system(size: 10, weight: .black, design: .monospaced))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(camera.accentColor.opacity(0.85))
+                            .foregroundColor(.black)
+                            .cornerRadius(3)
                     }
-
-                    // Remaining shots / frame count
-                    Text(String(format: "[%03d]", max(0, 999 - photoCount)))
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(.yellow)
-
-                    // Sensor / Format badge
-                    Text(camera.rawValue)
-                        .font(.system(size: 10, weight: .black, design: .monospaced))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(camera.accentColor.opacity(0.85))
-                        .foregroundColor(.black)
-                        .cornerRadius(3)
 
                     Spacer()
 
-                    // Grain indicator
-                    if isGrainOn {
-                        Text("GRAIN")
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.8))
-                    }
+                    if !isRecording {
+                        // AI Filter Recommendation
+                        if !aiFilterRecommendation.isEmpty && aiFilterRecommendation != "Natural" {
+                            Text("AI: \(aiFilterRecommendation.uppercased())")
+                                .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 2)
+                                .background(Color.yellow.opacity(0.8))
+                                .foregroundColor(.black)
+                                .cornerRadius(2)
+                        }
 
-                    // Aspect ratio indicator
-                    Text(aspectRatio.rawValue)
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(.cyan)
+                        // Grain indicator
+                        if isGrainOn {
+                            Text("GRAIN")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.8))
+                        }
 
-                    // Flash indicator
-                    HStack(spacing: 2) {
-                        Image(systemName: flashMode.iconName)
-                            .font(.system(size: 11, weight: .semibold))
-                        Text(flashMode.rawValue.uppercased())
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        // Aspect ratio indicator
+                        Text(aspectRatio.rawValue)
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(.cyan)
+
+                        // Flash indicator
+                        HStack(spacing: 2) {
+                            Image(systemName: flashMode.iconName)
+                                .font(.system(size: 11, weight: .semibold))
+                            Text(flashMode.rawValue.uppercased())
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        }
+                        .foregroundColor(flashMode.iconColor)
                     }
-                    .foregroundColor(flashMode.iconColor)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
@@ -73,9 +110,9 @@ struct RetroViewfinderHUD: View {
                 // Bottom LCD Status Line
                 HStack {
                     // Left: Exposure / ISO Readout
-                    Text("ISO 100  EV +0.0")
+                    Text(aiFilterRecommendation == "Night Boost" || aiFilterRecommendation == "Neon Shift" ? "ISO 800  EV -1.0" : "ISO 100  EV +0.0")
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.85))
+                        .foregroundColor(aiFilterRecommendation == "Night Boost" ? .yellow : .white.opacity(0.85))
                         .padding(.leading, 16)
                         .padding(.bottom, 12)
 
@@ -84,9 +121,9 @@ struct RetroViewfinderHUD: View {
                     // Right: Iconic Glowing Y2K Date Stamp Preview
                     if isDateStampOn {
                         Text(RetroDateStamper.formattedDate(style: .currentYear))
-                            .font(.system(size: 13, weight: .black, design: .monospaced))
+                            .font(.custom("Menlo-BoldItalic", size: 14))
                             .foregroundColor(Color(camera.dateStampColor))
-                            .shadow(color: Color(camera.dateStampColor).opacity(0.9), radius: 5)
+                            .shadow(color: Color(camera.dateStampColor).opacity(1.0), radius: 6)
                             .padding(.trailing, 16)
                             .padding(.bottom, 12)
                     }
@@ -100,6 +137,18 @@ struct RetroViewfinderHUD: View {
                 )
             }
         }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
+                blinkToggle.toggle()
+            }
+        }
+    }
+
+    // Formats TimeInterval to mm:ss
+    private func formatDuration(_ duration: TimeInterval) -> String {
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return String(format: "%02d:%02d", minutes, seconds)
     }
 
     // MARK: - Aspect Ratio Masking

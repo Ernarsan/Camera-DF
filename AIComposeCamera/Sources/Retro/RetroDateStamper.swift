@@ -57,7 +57,7 @@ public enum RetroDateStamper {
 
             // Authentic digital monospace font
             let font: UIFont
-            if let digitalFont = UIFont(name: "Courier-Bold", size: fontSize) {
+            if let digitalFont = UIFont(name: "Menlo-BoldItalic", size: fontSize) {
                 font = digitalFont
             } else {
                 font = UIFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .black)
@@ -67,8 +67,8 @@ public enum RetroDateStamper {
             cgContext.saveGState()
             cgContext.setShadow(
                 offset: CGSize(width: 0, height: 1),
-                blur: fontSize * 0.35,
-                color: color.withAlphaComponent(0.85).cgColor
+                blur: fontSize * 0.45,
+                color: color.withAlphaComponent(1.0).cgColor
             )
 
             let attributes: [NSAttributedString.Key: Any] = [

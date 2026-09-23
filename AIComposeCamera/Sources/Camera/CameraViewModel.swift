@@ -219,6 +219,7 @@ final class CameraViewModel: NSObject, ObservableObject {
 
     /// Set a specific zoom factor (0.5x, 1x, 2x, 5x, 10x).
     func setZoomFactor(_ factor: CGFloat) {
+        AudioHapticEngine.shared.playHapticZoom()
         if factor <= 0.75 {
             // Ultra-wide lens requested
             switchToUltraWide()
@@ -342,6 +343,7 @@ final class CameraViewModel: NSObject, ObservableObject {
 
     /// Toggle alignment mode (Ai button).
     func toggleAlignmentMode() {
+        AudioHapticEngine.shared.playHapticZoom()
         isAlignmentModeOn.toggle()
         if isAlignmentModeOn {
             alignmentInstruction = "Ai Detecting the scene. Keep your phone still."
@@ -473,6 +475,14 @@ final class CameraViewModel: NSObject, ObservableObject {
     private func doCapture() {
         let settings = AVCapturePhotoSettings()
 
+        // --- 10x Camera Quality Upgrades ---
+        if photoOutput.isHighResolutionCaptureEnabled {
+            settings.isHighResolutionPhotoEnabled = true
+        }
+        if #available(iOS 13.0, *) {
+            settings.photoQualityPrioritization = .quality
+        }
+
         // Flash mode
         let desiredFlashMode: AVCaptureDevice.FlashMode
         switch flashMode {
@@ -489,6 +499,9 @@ final class CameraViewModel: NSObject, ObservableObject {
         } else {
             settings.flashMode = .off
         }
+
+        AudioHapticEngine.shared.playHapticShutter()
+        AudioHapticEngine.shared.playShutterSound()
 
         photoOutput.capturePhoto(with: settings, delegate: self)
     }
@@ -602,9 +615,19 @@ final class CameraViewModel: NSObject, ObservableObject {
             // Video recorder output
             if self.captureSession.canAddOutput(self.movieOutput) {
                 self.captureSession.addOutput(self.movieOutput)
+                // --- 10x Camera Quality Upgrades ---
+                if let connection = self.movieOutput.connection(with: .video) {
+                    if connection.isVideoStabilizationSupported {
+                        connection.preferredVideoStabilizationMode = .cinematicExtended
+                    }
+                }
             }
 
             self.configureOutputOrientations()
+            
+            // --- 10x Camera Quality Upgrades ---
+            self.photoOutput.isHighResolutionCaptureEnabled = true
+            
             self.captureSession.commitConfiguration()
             self.captureSession.startRunning()
         }
@@ -700,10 +723,14 @@ extension CameraViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
                     let aspect: CGFloat = 16.0 / 9.0 
                     let distance = sqrt(dx * dx + (dy * aspect) * (dy * aspect))
                     
+                    let wasAligned = self.isAligned
                     self.isAligned = distance < 0.085
                     
                     if self.isAligned {
                         self.alignmentInstruction = "✦ Perfect Composition ✦"
+                        if !wasAligned {
+                            AudioHapticEngine.shared.playHapticAlignment(isAligned: true)
+                        }
                     } else {
                         if abs(dx) > abs(dy) {
                             self.alignmentInstruction = dx > 0 ? "Move right →" : "← Move left"

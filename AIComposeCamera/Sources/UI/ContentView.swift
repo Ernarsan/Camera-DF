@@ -107,6 +107,9 @@ struct ContentView: View {
                 isGrainOn: viewModel.isGrainEnabled,
                 photoCount: viewModel.sessionPhotoCount,
                 flashMode: viewModel.flashMode,
+                isRecording: viewModel.isRecording,
+                recordingDuration: viewModel.recordingDuration,
+                aiFilterRecommendation: viewModel.filterName,
                 containerSize: size
             )
 
