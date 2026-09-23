@@ -486,7 +486,7 @@ final class CameraViewModel: NSObject, ObservableObject {
         }
         
         if #available(iOS 16.0, *) {
-            if let maxDim = photoOutput.supportedMaxPhotoDimensions.last {
+            if let device = self.currentDevice, let maxDim = device.activeFormat.supportedMaxPhotoDimensions.last {
                 settings.maxPhotoDimensions = maxDim
             }
         }
@@ -630,7 +630,7 @@ final class CameraViewModel: NSObject, ObservableObject {
                     self.photoOutput.maxPhotoQualityPrioritization = .quality
                 }
                 if #available(iOS 16.0, *) {
-                    if let maxDim = self.photoOutput.supportedMaxPhotoDimensions.last {
+                    if let maxDim = device.activeFormat.supportedMaxPhotoDimensions.last {
                         self.photoOutput.maxPhotoDimensions = maxDim
                     }
                 }
