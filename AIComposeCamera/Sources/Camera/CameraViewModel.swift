@@ -890,11 +890,20 @@ extension CameraViewModel: AVCapturePhotoCaptureDelegate {
                 return
             }
 
+            // Target around 1.8 - 2.0 MB as requested by user
+            guard let jpegData = image.jpegData(compressionQuality: 0.72) else {
+                PHPhotoLibrary.shared().performChanges {
+                    PHAssetChangeRequest.creationRequestForAsset(from: image)
+                }
+                return
+            }
+
             PHPhotoLibrary.shared().performChanges {
-                PHAssetChangeRequest.creationRequestForAsset(from: image)
+                let request = PHAssetCreationRequest.forAsset()
+                request.addResource(with: .photo, data: jpegData, options: nil)
             } completionHandler: { success, error in
                 if success {
-                    print("[CameraVM] Photo saved to library")
+                    print("[CameraVM] Photo saved to library (size: \(jpegData.count / 1024) KB)")
                 } else {
                     print("[CameraVM] Save error: \(error?.localizedDescription ?? "unknown")")
                 }

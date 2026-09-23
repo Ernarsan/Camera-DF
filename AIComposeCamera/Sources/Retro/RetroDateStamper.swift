@@ -42,7 +42,10 @@ public enum RetroDateStamper {
         let color = profile.dateStampColor
 
         let imageSize = image.size
-        let renderer = UIGraphicsImageRenderer(size: imageSize)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1.0 // CRITICAL: Prevent 3x retina scaling (was inflating 12MP to 109.7 MP: 9072x12096!)
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: imageSize, format: format)
 
         return renderer.image { context in
             // Draw original image
