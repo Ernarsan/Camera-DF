@@ -74,9 +74,6 @@ final class CameraViewModel: NSObject, ObservableObject {
     @Published var isAnalyzing: Bool = false
     @Published var suggestedBox: CGRect?
     @Published var suggestedZoom: CGFloat?
-    @Published var sceneDescription: String = ""
-    @Published var filterName: String = ""
-    @Published var filterReason: String = ""
     @Published var capturedImage: UIImage?
     @Published var currentZoomFactor: CGFloat = 1.0
 
@@ -85,9 +82,6 @@ final class CameraViewModel: NSObject, ObservableObject {
     @Published var currentSubjectPoint: CGPoint?
     @Published var isAligned: Bool = false
     @Published var alignmentInstruction: String = ""
-
-    // Night Enhancer
-    @Published var isLowLight: Bool = false
 
     // UI State
     @Published var isAlignmentModeOn: Bool = false {
@@ -783,8 +777,6 @@ extension CameraViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
             }
 
             let composition = CompositionAnalyzer.analyze(pixelBuffer: pixelBuffer, orientation: .up)
-            let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-            let recommendation = SceneFilterRecommender.recommend(for: ciImage, context: self.ciContext)
 
             let latency = (CFAbsoluteTimeGetCurrent() - now) * 1000
             print(String(format: "[AI] inference latency (composition): %.1fms", latency))
@@ -810,11 +802,8 @@ extension CameraViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
                 }
 
                 self.suggestedZoom = composition.suggestedZoom
-                self.sceneDescription = recommendation.sceneDescription
-                self.filterName = recommendation.filterName
-                self.filterReason = recommendation.reason
-                self.isLowLight = (recommendation.filterName == "Night Boost")
                 self.isAnalyzing = false
+                self.analysisCoordinator.isInferenceRunning = false
                 self.analysisCoordinator.isInferenceRunning = false
             }
         }
@@ -864,13 +853,7 @@ extension CameraViewModel: AVCapturePhotoCaptureDelegate {
                 includeGrain: self.isGrainEnabled
             )
 
-            // 2. Apply Night Boost if scene is dark
-            if self.isLowLight {
-                let nightResult = NightEnhancer.enhanceIfNeeded(finalImage)
-                if nightResult.isLowLight, let enhanced = nightResult.enhancedImage {
-                    finalImage = enhanced
-                }
-            }
+
 
             // 3. Stamp Y2K Digital Date if enabled
             if self.isDateStampEnabled {

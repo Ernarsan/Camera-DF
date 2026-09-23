@@ -264,35 +264,12 @@ struct ContentView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            if !viewModel.filterName.isEmpty && !viewModel.isAnalyzing && !viewModel.isAlignmentModeOn {
-                SuggestionBubbleView.filterRecommendation(
-                    name: viewModel.filterName,
-                    reason: viewModel.filterReason
-                )
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
             if viewModel.isAlignmentModeOn && !viewModel.alignmentInstruction.isEmpty {
                 SuggestionBubbleView.alignment(instruction: viewModel.alignmentInstruction)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
-
-            if viewModel.isLowLight && !viewModel.isAlignmentModeOn {
-                HStack(spacing: 6) {
-                    Image(systemName: "moon.stars.fill")
-                        .font(.system(size: 12))
-                        .foregroundColor(.yellow)
-                    Text("Night Boost Active")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.white)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(.ultraThinMaterial).environment(\.colorScheme, .dark))
-            }
         }
         .animation(.easeInOut(duration: 0.3), value: viewModel.isAnalyzing)
-        .animation(.easeInOut(duration: 0.3), value: viewModel.filterName)
         .animation(.easeInOut(duration: 0.3), value: viewModel.alignmentInstruction)
     }
 
