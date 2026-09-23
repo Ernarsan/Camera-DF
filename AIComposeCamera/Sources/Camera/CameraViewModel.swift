@@ -480,7 +480,7 @@ final class CameraViewModel: NSObject, ObservableObject {
             settings.isHighResolutionPhotoEnabled = true
         }
         if #available(iOS 13.0, *) {
-            settings.photoQualityPrioritization = .quality
+            settings.photoQualityPrioritization = photoOutput.maxPhotoQualityPrioritization
         }
 
         // Flash mode
@@ -610,6 +610,12 @@ final class CameraViewModel: NSObject, ObservableObject {
             // Photo output
             if self.captureSession.canAddOutput(self.photoOutput) {
                 self.captureSession.addOutput(self.photoOutput)
+                
+                // Enable hardware-level high resolution and quality for AI super res
+                self.photoOutput.isHighResolutionCaptureEnabled = true
+                if #available(iOS 13.0, *) {
+                    self.photoOutput.maxPhotoQualityPrioritization = .quality
+                }
             }
 
             // Video recorder output
