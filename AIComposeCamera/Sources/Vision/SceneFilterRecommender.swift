@@ -9,9 +9,8 @@ struct SceneRecommendation {
     let reason: String
 }
 
-/// Analyzes scene brightness and color temperature to recommend a CIFilter.
+/// Analyzes scene brightness, color temperature, and contrast to recommend a CIFilter.
 class SceneFilterRecommender {
-    /// Serial queue to protect mutable `lastFilterType` state.
     private static let stateQueue = DispatchQueue(label: "com.aicompose.scenefilter.state")
     private static var _lastFilterType: FilterType = .natural
 
@@ -24,38 +23,30 @@ class SceneFilterRecommender {
         case cool
         case warm
         case night
+        case neon
         case natural
+        case vivid
     }
 
     /// Shared CIContext for rendering efficiency.
     static let sharedContext = CIContext(options: nil)
 
-    /// Analyzes the given image and recommends a filter.
-    ///
-    /// - Parameters:
-    ///   - image: The input `CIImage` to analyze.
-    ///   - context: The `CIContext` used for rendering the analysis filter.
-    /// - Returns: A `SceneRecommendation` detailing the suggested filter.
     static func recommend(for image: CIImage, context: CIContext = sharedContext) -> SceneRecommendation {
-        // Fallback to natural if extent is invalid or infinite
         guard !image.extent.isEmpty, !image.extent.isInfinite else {
             lastFilterType = .natural
-            return SceneRecommendation(sceneDescription: "Balanced scene", filterName: "Natural", reason: "Scene looks great as-is, no filter needed")
+            return SceneRecommendation(sceneDescription: "Balanced", filterName: "Natural", reason: "Standard lighting detected")
         }
         
         let extent = image.extent
-        
-        // 1. Calculate average brightness using CIAreaAverage filter
         let areaAverageFilter = CIFilter.areaAverage()
         areaAverageFilter.inputImage = image
         areaAverageFilter.extent = extent
         
         guard let outputImage = areaAverageFilter.outputImage else {
             lastFilterType = .natural
-            return SceneRecommendation(sceneDescription: "Balanced scene", filterName: "Natural", reason: "Scene looks great as-is, no filter needed")
+            return SceneRecommendation(sceneDescription: "Balanced", filterName: "Natural", reason: "Standard lighting detected")
         }
         
-        // Render to a 1x1 bitmap to read average color
         var bitmap = [UInt8](repeating: 0, count: 4)
         context.render(outputImage,
                        toBitmap: &bitmap,
@@ -64,50 +55,73 @@ class SceneFilterRecommender {
                        format: .RGBA8,
                        colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
         
-        // Read pixel data
         let r = CGFloat(bitmap[0]) / 255.0
         let g = CGFloat(bitmap[1]) / 255.0
         let b = CGFloat(bitmap[2]) / 255.0
-        
-        // Brightness
         let brightness = (r + g + b) / 3.0
         
-        // 2 & 3. Scenarios and logic
-        if brightness > 0.45 && b > r {
-            lastFilterType = .cool
-            return SceneRecommendation(
-                sceneDescription: "Bright scene with cool tones",
-                filterName: "Cool F160C",
-                reason: "Cool filter enhances the blue tones in the scene"
-            )
-        } else if brightness > 0.45 && r > b {
-            lastFilterType = .warm
-            return SceneRecommendation(
-                sceneDescription: "Bright scene with warm tones",
-                filterName: "Warm Classic",
-                reason: "Warm filter brings out the golden hues"
-            )
-        } else if brightness <= 0.25 {
-            lastFilterType = .night
-            return SceneRecommendation(
-                sceneDescription: "Low light scene",
-                filterName: "Night Boost",
-                reason: "Enhanced contrast and exposure for dark scenes"
-            )
+        // Smart AI Scenarios
+        if brightness < 0.20 {
+            // Low Light
+            if r > g && r > b + 0.1 {
+                lastFilterType = .neon
+                return SceneRecommendation(
+                    sceneDescription: "Cyberpunk / Neon Night",
+                    filterName: "Neon Shift",
+                    reason: "Boosts red/magenta luminance for striking night portraits"
+                )
+            } else {
+                lastFilterType = .night
+                return SceneRecommendation(
+                    sceneDescription: "Low Light Scene",
+                    filterName: "Night Boost",
+                    reason: "Enhances shadow details and mitigates noise"
+                )
+            }
+        } else if brightness > 0.70 {
+            // Very Bright
+            if b > r + 0.1 {
+                lastFilterType = .cool
+                return SceneRecommendation(
+                    sceneDescription: "Bright Sky / Snow",
+                    filterName: "Cool Blue",
+                    reason: "Cooler temperature preserves highlight details in skies"
+                )
+            } else if r > b + 0.1 && g > b {
+                lastFilterType = .warm
+                return SceneRecommendation(
+                    sceneDescription: "Golden Hour",
+                    filterName: "Warm Glow",
+                    reason: "Accentuates golden light and enhances skin tones"
+                )
+            } else {
+                lastFilterType = .natural
+                return SceneRecommendation(
+                    sceneDescription: "Harsh Lighting",
+                    filterName: "Natural HDR",
+                    reason: "Balances extreme highlights"
+                )
+            }
         } else {
-            lastFilterType = .natural
-            return SceneRecommendation(
-                sceneDescription: "Balanced scene",
-                filterName: "Natural",
-                reason: "Scene looks great as-is, no filter needed"
-            )
+            // Mid-tones
+            if g > r && g > b {
+                lastFilterType = .vivid
+                return SceneRecommendation(
+                    sceneDescription: "Lush Nature",
+                    filterName: "Vivid Green",
+                    reason: "Saturates foliage and earth tones"
+                )
+            } else {
+                lastFilterType = .natural
+                return SceneRecommendation(
+                    sceneDescription: "Balanced Studio Light",
+                    filterName: "Natural",
+                    reason: "Perfectly exposed mid-tones"
+                )
+            }
         }
     }
     
-    /// Applies the last recommended filter to a given `UIImage`.
-    ///
-    /// - Parameter image: The `UIImage` to process.
-    /// - Returns: A new `UIImage` with the filter applied, or the original image if no filter or natural was recommended.
     static func applyLastFilter(to image: UIImage) -> UIImage {
         guard lastFilterType != .natural,
               let cgImage = image.cgImage else {
@@ -117,7 +131,6 @@ class SceneFilterRecommender {
         let ciImage = CIImage(cgImage: cgImage)
         let outputImage: CIImage?
         
-        // 4. Apply specific CIFilter configurations based on the last recommendation
         switch lastFilterType {
         case .cool:
             let filter = CIFilter.temperatureAndTint()
@@ -135,13 +148,24 @@ class SceneFilterRecommender {
             let filter = CIFilter.colorControls()
             filter.inputImage = ciImage
             filter.contrast = 1.15
-            filter.brightness = 0.05
+            filter.brightness = 0.08
+            outputImage = filter.outputImage
+        case .neon:
+            let filter = CIFilter.colorControls()
+            filter.inputImage = ciImage
+            filter.contrast = 1.30
+            filter.saturation = 1.40
+            outputImage = filter.outputImage
+        case .vivid:
+            let filter = CIFilter.colorControls()
+            filter.inputImage = ciImage
+            filter.contrast = 1.10
+            filter.saturation = 1.25
             outputImage = filter.outputImage
         case .natural:
             outputImage = nil
         }
         
-        // Render and return the final image
         guard let finalCIImage = outputImage,
               let finalCGImage = sharedContext.createCGImage(finalCIImage, from: finalCIImage.extent) else {
             return image
