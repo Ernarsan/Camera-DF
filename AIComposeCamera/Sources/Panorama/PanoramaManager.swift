@@ -181,14 +181,41 @@ class PanoramaManager: ObservableObject {
             
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
-                for point in self.capturePoints {
-                    if let data = point.capturedImageData, let image = UIImage(data: data) {
-                        PHPhotoLibrary.shared().performChanges({
-                            PHAssetChangeRequest.creationRequestForAsset(from: image)
-                        }) { success, error in
-                            if let error = error {
-                                print("Error saving panorama part: \(error.localizedDescription)")
-                            }
+                
+                let images: [UIImage] = self.capturePoints.compactMap { point in
+                    guard let data = point.capturedImageData else { return nil }
+                    return UIImage(data: data)
+                }
+                
+                guard !images.isEmpty else { return }
+                
+                let cols = 4
+                let rows = Int(ceil(Double(images.count) / Double(cols)))
+                
+                let sampleSize = images.first!.size
+                let scale: CGFloat = 0.25
+                let w = sampleSize.width * scale
+                let h = sampleSize.height * scale
+                let collageSize = CGSize(width: w * CGFloat(cols), height: h * CGFloat(rows))
+                
+                UIGraphicsBeginImageContextWithOptions(collageSize, true, 1.0)
+                
+                for (index, image) in images.enumerated() {
+                    let col = index % cols
+                    let row = index / cols
+                    let rect = CGRect(x: CGFloat(col) * w, y: CGFloat(row) * h, width: w, height: h)
+                    image.draw(in: rect)
+                }
+                
+                let collageImage = UIGraphicsGetImageFromCurrentImageContext()
+                UIGraphicsEndImageContext()
+                
+                if let finalImage = collageImage {
+                    PHPhotoLibrary.shared().performChanges({
+                        PHAssetChangeRequest.creationRequestForAsset(from: finalImage)
+                    }) { success, error in
+                        if let error = error {
+                            print("Error saving panorama collage: \(error.localizedDescription)")
                         }
                     }
                 }

@@ -191,10 +191,12 @@ final class CameraViewModel: NSObject, ObservableObject {
                 audioGranted = await AVCaptureDevice.requestAccess(for: .audio)
             }
             
-            isCameraAuthorized = videoGranted // Main app relies on video mostly
+            await MainActor.run {
+                self.isCameraAuthorized = videoGranted // Main app relies on video mostly
+            }
             
-            guard isCameraAuthorized else { return }
-            configureSession()
+            guard videoGranted else { return }
+            self.configureSession()
         }
     }
 

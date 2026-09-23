@@ -31,17 +31,24 @@ public final class VideoRecorder: NSObject, ObservableObject {
         let fileURL = tempDirectory.appendingPathComponent(fileName)
         
         movieOutput.startRecording(to: fileURL, recordingDelegate: self)
-        isRecording = true
-        startTimer()
+        
+        Task { @MainActor in
+            self.isRecording = true
+            self.startTimer()
+        }
     }
     
     public func stopRecording() {
         guard movieOutput.isRecording else { return }
         movieOutput.stopRecording()
-        isRecording = false
-        stopTimer()
+        
+        Task { @MainActor in
+            self.isRecording = false
+            self.stopTimer()
+        }
     }
     
+    @MainActor
     private func startTimer() {
         recordingDuration = 0
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -51,6 +58,7 @@ public final class VideoRecorder: NSObject, ObservableObject {
         }
     }
     
+    @MainActor
     private func stopTimer() {
         timer?.invalidate()
         timer = nil
