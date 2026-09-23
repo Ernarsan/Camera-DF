@@ -1,23 +1,31 @@
 name: Build iOS IPA
 
 on:
-  workflow_dispatch: # Allows manual trigger from Actions tab
+  workflow_dispatch:
   push:
     branches: [ main, master ]
 
 permissions:
-  contents: write # Needed for creating GitHub Releases and uploading assets
+  contents: write
 
 jobs:
   build-ipa:
-    runs-on: macos-15 # Fast Apple Silicon (M-series) runner
+    runs-on: macos-15
     steps:
       - name: ⬇️ Checkout repository
         uses: actions/checkout@v4
 
-      - name: 📱 Select Xcode
+      - name: 🛠️ Install XcodeGen
         run: |
-          for xcode in /Applications/Xcode_26*.app /Applications/Xcode*.app; do
+          brew install xcodegen
+
+      - name: ⚙️ Generate Xcode Project
+        run: |
+          xcodegen generate
+
+      - name: 📱 Select Xcode Version
+        run: |
+          for xcode in /Applications/Xcode_16*.app /Applications/Xcode*.app; do
             if [ -d "$xcode" ]; then
               echo "Selecting $xcode"
               sudo xcode-select -s "$xcode/Contents/Developer"
@@ -27,44 +35,12 @@ jobs:
           xcodebuild -version
           swift -version
 
-      - name: 🛠️ Install XcodeGen
-        run: |
-          brew install xcodegen
-
-      - name: ⚙️ Generate Xcode Project
-        run: |
-          cd AIComposeCamera
-          xcodegen generate --spec project.yml
-          ls -la
-
-      - name: 🔧 Patch project.pbxproj for Unsigned Build
-        run: |
-          python3 -c "
-          import os
-
-          pbx_path = 'AIComposeCamera/AIComposeCamera.xcodeproj/project.pbxproj'
-          if os.path.exists(pbx_path):
-              with open(pbx_path, 'r', encoding='utf-8') as f:
-                  content = f.read()
-              
-              content = content.replace('CODE_SIGN_STYLE = Automatic;', 'CODE_SIGN_STYLE = Manual;')
-              content = content.replace('ProvisioningStyle = Automatic;', 'ProvisioningStyle = Manual;')
-              content = content.replace('CODE_SIGNING_ALLOWED = YES;', 'CODE_SIGNING_ALLOWED = NO;')
-              content = content.replace('buildSettings = {', 'buildSettings = {\n\t\t\t\tCODE_SIGNING_ALLOWED = NO;\n\t\t\t\tCODE_SIGNING_REQUIRED = NO;\n\t\t\t\tCODE_SIGN_IDENTITY = \"\";\n\t\t\t\tDEVELOPMENT_TEAM = \"\";\n\t\t\t\tPROVISIONING_PROFILE_SPECIFIER = \"\";')
-              
-              with open(pbx_path, 'w', encoding='utf-8') as f:
-                  f.write(content)
-              print('✅ project.pbxproj patched for unsigned build')
-          else:
-              print('⚠️ project.pbxproj not found at:', pbx_path)
-          "
-
-      - name: 📱 Build Archive via Xcode (Real iPhone ARM64)
+      - name: ⚙️ Build Archive via Xcode (Real iPhone ARM64)
         run: |
           mkdir -p build
           set -o pipefail
           xcodebuild archive \
-            -project "AIComposeCamera/AIComposeCamera.xcodeproj" \
+            -project "AIComposeCamera.xcodeproj" \
             -scheme "AIComposeCamera" \
             -archivePath "build/AIComposeCamera.xcarchive" \
             -configuration Release \
@@ -111,8 +87,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         with:
           tag_name: v1.0.${{ github.run_number }}
-          name: "AI Compose Camera v1.0.${{ github.run_number }}"
-          body: "Готовый к установке iOS IPA файл приложения AI Compose Camera, собранный через GitHub Actions без платного аккаунта Apple."
+          name: "AIComposeCamera v1.0.${{ github.run_number }}"
+          body: "Готовый к установке iOS IPA файл приложения AIComposeCamera, собранный через GitHub Actions без платного аккаунта Apple."
           files: build/AIComposeCamera.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

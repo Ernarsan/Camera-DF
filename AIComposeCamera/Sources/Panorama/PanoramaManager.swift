@@ -25,6 +25,9 @@ class PanoramaManager: ObservableObject {
 
     private let motionManager = CMMotionManager()
     private let motionQueue = OperationQueue()
+    
+    private var initialPitch: Double?
+    private var initialYaw: Double?
 
     nonisolated let alignmentThreshold: Double = 0.15
     nonisolated let nearbyThreshold: Double = 0.4
@@ -63,17 +66,32 @@ class PanoramaManager: ObservableObject {
         guard motionManager.isDeviceMotionAvailable else { return }
         
         isCapturing = true
+        initialPitch = nil
+        initialYaw = nil
         motionQueue.maxConcurrentOperationCount = 1
         
         motionManager.deviceMotionUpdateInterval = 1.0 / 60.0
         motionManager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: motionQueue) { @Sendable [weak self] motion, error in
             guard let motion = motion, error == nil else { return }
             
-            let pitch = motion.attitude.pitch
-            let yaw = motion.attitude.yaw
-            
             Task { @MainActor [weak self] in
-                self?.updatePosition(pitch: pitch, yaw: yaw)
+                guard let self = self else { return }
+                
+                if self.initialPitch == nil {
+                    self.initialPitch = motion.attitude.pitch
+                    self.initialYaw = motion.attitude.yaw
+                }
+                
+                if let initPitch = self.initialPitch, let initYaw = self.initialYaw {
+                    let relPitch = motion.attitude.pitch - initPitch
+                    var relYaw = motion.attitude.yaw - initYaw
+                    
+                    // Normalize yaw to -pi ... pi
+                    while relYaw > .pi { relYaw -= 2 * .pi }
+                    while relYaw < -.pi { relYaw += 2 * .pi }
+                    
+                    self.updatePosition(pitch: relPitch, yaw: relYaw)
+                }
             }
         }
     }
@@ -135,7 +153,7 @@ class PanoramaManager: ObservableObject {
             }
         }
         
-        if let idx = closestIdx, minDistance <= alignmentThreshold {
+        if let idx = closestIdx {
             capturePoints[idx].isCaptured = true
             capturePoints[idx].capturedImageData = imageData
             capturedCount += 1

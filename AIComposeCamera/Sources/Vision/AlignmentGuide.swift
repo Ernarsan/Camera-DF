@@ -24,37 +24,50 @@ public class AlignmentGuide {
         pixelBuffer: CVPixelBuffer,
         orientation: CGImagePropertyOrientation = .up
     ) -> AlignmentGuidance {
+        // Single handler — Vision reuses the internal pixel buffer across all requests
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: orientation, options: [:])
 
-        // Step 1: Try Face Detection
+        // Create all requests upfront
         let faceRequest = VNDetectFaceRectanglesRequest()
-        if let _ = try? handler.perform([faceRequest]),
-           let faces = faceRequest.results,
-           let firstFace = faces.first {
+        let humanRequest = VNDetectHumanRectanglesRequest()
+        let saliencyRequest = VNGenerateAttentionBasedSaliencyImageRequest()
+
+        // Single perform() call — eliminates 3× handler creation overhead
+        guard let _ = try? handler.perform([faceRequest, humanRequest, saliencyRequest]) else {
+            return AlignmentGuidance(
+                targetPoint: targetPoint,
+                currentSubjectPoint: nil,
+                distance: .infinity,
+                isAligned: false,
+                instruction: "Aim at subject to align composition"
+            )
+        }
+
+        // Step 1: Try Face Detection (highest priority)
+        if let faces = faceRequest.results, !faces.isEmpty {
+            // Find the largest face to avoid jumping between multiple faces
+            let largestFace = faces.max(by: { $0.boundingBox.width * $0.boundingBox.height < $1.boundingBox.width * $1.boundingBox.height })!
             let faceCenter = CGPoint(
-                x: firstFace.boundingBox.midX,
-                y: firstFace.boundingBox.midY
+                x: largestFace.boundingBox.midX,
+                y: largestFace.boundingBox.midY
             )
             return processSubjectPoint(faceCenter)
         }
 
         // Step 2: Fallback to Human Detection
-        let humanRequest = VNDetectHumanRectanglesRequest()
-        if let _ = try? handler.perform([humanRequest]),
-           let humans = humanRequest.results,
-           let firstHuman = humans.first {
-            let box = firstHuman.boundingBox
+        if let humans = humanRequest.results, !humans.isEmpty {
+            let largestHuman = humans.max(by: { $0.boundingBox.width * $0.boundingBox.height < $1.boundingBox.width * $1.boundingBox.height })!
+            let box = largestHuman.boundingBox
             let upperY = box.minY + (box.height * 0.85) // Head approximation
             let headCenter = CGPoint(x: box.midX, y: upperY)
             return processSubjectPoint(headCenter)
         }
 
         // Step 3: Fallback to Neural Attention Saliency (for non-human objects, pets, food)
-        let saliencyRequest = VNGenerateAttentionBasedSaliencyImageRequest()
-        if let _ = try? handler.perform([saliencyRequest]),
-           let saliency = saliencyRequest.results?.first,
-           let object = saliency.salientObjects?.first {
-            let center = CGPoint(x: object.boundingBox.midX, y: object.boundingBox.midY)
+        if let saliency = saliencyRequest.results?.first,
+           let objects = saliency.salientObjects, !objects.isEmpty {
+            let largestObject = objects.max(by: { $0.boundingBox.width * $0.boundingBox.height < $1.boundingBox.width * $1.boundingBox.height })!
+            let center = CGPoint(x: largestObject.boundingBox.midX, y: largestObject.boundingBox.midY)
             return processSubjectPoint(center)
         }
 
@@ -71,7 +84,8 @@ public class AlignmentGuide {
     private static func processSubjectPoint(_ point: CGPoint) -> AlignmentGuidance {
         let dx = point.x - targetPoint.x
         let dy = point.y - targetPoint.y
-        let distance = sqrt(dx * dx + dy * dy)
+        let aspect: CGFloat = 16.0 / 9.0
+        let distance = sqrt(dx * dx + (dy * aspect) * (dy * aspect))
 
         let isAligned = distance < threshold
 

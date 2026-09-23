@@ -83,6 +83,9 @@ struct ContentView: View {
             }
         }
         .onChange(of: viewModel.currentMode) { newMode in
+            if viewModel.videoRecorder.isRecording {
+                viewModel.videoRecorder.stopRecording()
+            }
             if newMode == .panorama {
                 viewModel.panoramaManager.startSession()
             } else {
@@ -233,10 +236,12 @@ struct ContentView: View {
                     viewModel.capturePanoramaFrame()
                 },
                 onBack: {
+                    viewModel.panoramaManager.reset()
                     viewModel.currentMode = .photo
                 },
                 onSaveAll: {
                     viewModel.panoramaManager.saveAllToLibrary()
+                    viewModel.panoramaManager.reset()
                     viewModel.currentMode = .photo
                 }
             )

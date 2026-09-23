@@ -253,13 +253,20 @@ struct PanoramaView: View {
     }
 
     private func dotPosition(for point: PanoramaPoint, in containerSize: CGFloat) -> CGPoint {
-        // Map pitch/yaw to 2D display coordinates
-        let radius = containerSize * 0.4
-        let relYaw = point.targetYaw - manager.currentYaw
+        // Map pitch/yaw to 2D display coordinates using linear scaling
+        let radius = containerSize * 0.4 // This acts as our "fov" scale
+        
+        var relYaw = point.targetYaw - manager.currentYaw
+        // Normalize yaw so the shortest path is drawn
+        while relYaw > .pi { relYaw -= 2 * .pi }
+        while relYaw < -.pi { relYaw += 2 * .pi }
+        
         let relPitch = point.targetPitch - manager.currentPitch
-
-        let x = sin(relYaw) * radius * cos(point.targetPitch)
-        let y = -sin(relPitch) * radius
+        
+        // Scale radians directly to pixels (1 radian = `radius` pixels)
+        let x = CGFloat(relYaw) * radius
+        // Pitch is inverted: looking up (positive pitch) means dots move DOWN the screen
+        let y = CGFloat(-relPitch) * radius
 
         return CGPoint(x: x, y: y)
     }

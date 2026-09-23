@@ -13,6 +13,7 @@ private final class AnalysisCoordinator: @unchecked Sendable {
     private var _mode: CameraMode = .photo
     private var _isAlignmentOn: Bool = false
     private var _lastAnalysisTime: CFAbsoluteTime = 0
+    private var _isInferenceRunning: Bool = false
 
     var mode: CameraMode {
         get { lock.withLock { _mode } }
@@ -24,8 +25,16 @@ private final class AnalysisCoordinator: @unchecked Sendable {
         set { lock.withLock { _isAlignmentOn = newValue } }
     }
 
+    var isInferenceRunning: Bool {
+        get { lock.withLock { _isInferenceRunning } }
+        set { lock.withLock { _isInferenceRunning = newValue } }
+    }
+
     func shouldAnalyze(now: CFAbsoluteTime, interval: CFTimeInterval) -> Bool {
         lock.withLock {
+            if _isInferenceRunning {
+                return false
+            }
             if now - _lastAnalysisTime >= interval {
                 _lastAnalysisTime = now
                 return true
@@ -166,21 +175,24 @@ final class CameraViewModel: NSObject, ObservableObject {
 
     // MARK: - Public API
 
-    /// Request camera permission and configure the session.
+    /// Request camera and microphone permissions and configure the session.
     func start() {
         Task {
-            let status = AVCaptureDevice.authorizationStatus(for: .video)
-            switch status {
-            case .authorized:
-                isCameraAuthorized = true
-            case .notDetermined:
-                let granted = await AVCaptureDevice.requestAccess(for: .video)
-                isCameraAuthorized = granted
-            default:
-                isCameraAuthorized = false
-                return
+            let videoStatus = AVCaptureDevice.authorizationStatus(for: .video)
+            let audioStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+            
+            var videoGranted = videoStatus == .authorized
+            if videoStatus == .notDetermined {
+                videoGranted = await AVCaptureDevice.requestAccess(for: .video)
             }
-
+            
+            var audioGranted = audioStatus == .authorized
+            if audioStatus == .notDetermined {
+                audioGranted = await AVCaptureDevice.requestAccess(for: .audio)
+            }
+            
+            isCameraAuthorized = videoGranted // Main app relies on video mostly
+            
             guard isCameraAuthorized else { return }
             configureSession()
         }
@@ -189,6 +201,9 @@ final class CameraViewModel: NSObject, ObservableObject {
     /// Stop the capture session.
     func stop() {
         countdownTask?.cancel()
+        if videoRecorder.isRecording {
+            videoRecorder.stopRecording()
+        }
         sessionQueue.async { [weak self] in
             self?.captureSession.stopRunning()
         }
@@ -245,6 +260,7 @@ final class CameraViewModel: NSObject, ObservableObject {
 
             self.configureOutputOrientations()
             self.captureSession.commitConfiguration()
+            self.configureFocusAndExposure(for: ultraWideDevice)
 
             Task { @MainActor [weak self] in
                 self?.currentDevice = ultraWideDevice
@@ -295,6 +311,7 @@ final class CameraViewModel: NSObject, ObservableObject {
                 }
 
                 self.captureSession.commitConfiguration()
+                self.configureFocusAndExposure(for: device)
 
                 Task { @MainActor [weak self] in
                     self?.currentDevice = device
@@ -329,11 +346,39 @@ final class CameraViewModel: NSObject, ObservableObject {
             targetCompositionPoint = nil
             currentSubjectPoint = nil
             isAligned = false
+            
+            // Lock focus to prevent jitter during AI alignment
+            sessionQueue.async { [weak self] in
+                guard let device = self?.currentDevice else { return }
+                do {
+                    try device.lockForConfiguration()
+                    if device.isFocusModeSupported(.locked) {
+                        device.focusMode = .locked
+                    }
+                    device.unlockForConfiguration()
+                } catch {
+                    print("[CameraVM] Failed to lock focus: \(error)")
+                }
+            }
         } else {
             targetCompositionPoint = nil
             currentSubjectPoint = nil
             isAligned = false
             alignmentInstruction = ""
+            
+            // Restore continuous autofocus
+            sessionQueue.async { [weak self] in
+                guard let device = self?.currentDevice else { return }
+                do {
+                    try device.lockForConfiguration()
+                    if device.isFocusModeSupported(.continuousAutoFocus) {
+                        device.focusMode = .continuousAutoFocus
+                    }
+                    device.unlockForConfiguration()
+                } catch {
+                    print("[CameraVM] Failed to restore focus: \(error)")
+                }
+            }
         }
     }
 
@@ -368,6 +413,7 @@ final class CameraViewModel: NSObject, ObservableObject {
 
             self.configureOutputOrientations(isFront: newPosition == .front)
             self.captureSession.commitConfiguration()
+            self.configureFocusAndExposure(for: device)
 
             Task { @MainActor [weak self] in
                 self?.currentDevice = device
@@ -426,13 +472,20 @@ final class CameraViewModel: NSObject, ObservableObject {
         let settings = AVCapturePhotoSettings()
 
         // Flash mode
+        let desiredFlashMode: AVCaptureDevice.FlashMode
         switch flashMode {
         case .off:
-            settings.flashMode = .off
+            desiredFlashMode = .off
         case .on:
-            settings.flashMode = .on
+            desiredFlashMode = .on
         case .auto:
-            settings.flashMode = .auto
+            desiredFlashMode = .auto
+        }
+        
+        if photoOutput.supportedFlashModes.contains(desiredFlashMode) {
+            settings.flashMode = desiredFlashMode
+        } else {
+            settings.flashMode = .off
         }
 
         photoOutput.capturePhoto(with: settings, delegate: self)
@@ -523,6 +576,7 @@ final class CameraViewModel: NSObject, ObservableObject {
 
             if self.captureSession.canAddInput(input) {
                 self.captureSession.addInput(input)
+                self.configureFocusAndExposure(for: device)
             }
 
             Task { @MainActor [weak self] in
@@ -551,6 +605,21 @@ final class CameraViewModel: NSObject, ObservableObject {
             self.configureOutputOrientations()
             self.captureSession.commitConfiguration()
             self.captureSession.startRunning()
+        }
+    }
+
+    nonisolated private func configureFocusAndExposure(for device: AVCaptureDevice) {
+        do {
+            try device.lockForConfiguration()
+            if device.isFocusModeSupported(.continuousAutoFocus) {
+                device.focusMode = .continuousAutoFocus
+            }
+            if device.isExposureModeSupported(.continuousAutoExposure) {
+                device.exposureMode = .continuousAutoExposure
+            }
+            device.unlockForConfiguration()
+        } catch {
+            print("[CameraVM] Failed to configure focus/exposure: \(error)")
         }
     }
 
@@ -592,15 +661,60 @@ extension CameraViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
         // 2. Synchronously obtain pixel buffer while sample buffer is guaranteed valid
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
+        analysisCoordinator.isInferenceRunning = true
+
         // 3. Process on analysisQueue directly (no task deferral!)
         if isAlignment {
             let guidance = AlignmentGuide.evaluate(pixelBuffer: pixelBuffer, orientation: .up)
+            
+            let latency = (CFAbsoluteTimeGetCurrent() - now) * 1000
+            print(String(format: "[AI] inference latency (alignment): %.1fms", latency))
+            
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
                 self.targetCompositionPoint = guidance.targetPoint
-                self.currentSubjectPoint = guidance.currentSubjectPoint
-                self.isAligned = guidance.isAligned
-                self.alignmentInstruction = guidance.instruction
+                
+                // EMA Smoothing to prevent flickering and bouncing
+                if let newPoint = guidance.currentSubjectPoint {
+                    if let oldPoint = self.currentSubjectPoint {
+                        let alpha: CGFloat = 0.35 // Higher alpha = faster tracking, lower = smoother
+                        self.currentSubjectPoint = CGPoint(
+                            x: oldPoint.x * (1 - alpha) + newPoint.x * alpha,
+                            y: oldPoint.y * (1 - alpha) + newPoint.y * alpha
+                        )
+                    } else {
+                        self.currentSubjectPoint = newPoint
+                    }
+                } else {
+                    // Fallback to nil if subject is completely lost
+                    self.currentSubjectPoint = nil
+                }
+                
+                // Recalculate isAligned and instruction based on smoothed point
+                if let smoothedPoint = self.currentSubjectPoint {
+                    let dx = smoothedPoint.x - guidance.targetPoint.x
+                    let dy = smoothedPoint.y - guidance.targetPoint.y
+                    // Apply rough aspect ratio scale for correct Euclidean distance feeling on screen
+                    let aspect: CGFloat = 16.0 / 9.0 
+                    let distance = sqrt(dx * dx + (dy * aspect) * (dy * aspect))
+                    
+                    self.isAligned = distance < 0.085
+                    
+                    if self.isAligned {
+                        self.alignmentInstruction = "✦ Perfect Composition ✦"
+                    } else {
+                        if abs(dx) > abs(dy) {
+                            self.alignmentInstruction = dx > 0 ? "Move right →" : "← Move left"
+                        } else {
+                            self.alignmentInstruction = dy > 0 ? "Move up ↑" : "↓ Move down"
+                        }
+                    }
+                } else {
+                    self.isAligned = false
+                    self.alignmentInstruction = "Aim at subject to align composition"
+                }
+
+                self.analysisCoordinator.isInferenceRunning = false
             }
         } else {
             Task { @MainActor [weak self] in
@@ -610,6 +724,9 @@ extension CameraViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
             let composition = CompositionAnalyzer.analyze(pixelBuffer: pixelBuffer, orientation: .up)
             let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
             let recommendation = SceneFilterRecommender.recommend(for: ciImage, context: self.ciContext)
+
+            let latency = (CFAbsoluteTimeGetCurrent() - now) * 1000
+            print(String(format: "[AI] inference latency (composition): %.1fms", latency))
 
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
@@ -637,6 +754,7 @@ extension CameraViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
                 self.filterReason = recommendation.reason
                 self.isLowLight = (recommendation.filterName == "Night Boost")
                 self.isAnalyzing = false
+                self.analysisCoordinator.isInferenceRunning = false
             }
         }
     }

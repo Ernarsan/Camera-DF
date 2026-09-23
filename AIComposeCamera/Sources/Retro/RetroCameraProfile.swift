@@ -52,7 +52,6 @@ public enum RetroCameraProfile: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Accent badge color
     public var accentColor: Color {
         switch self {
         case .ccd: return Color(red: 1.0, green: 0.55, blue: 0.0) // Iconic Orange
@@ -62,6 +61,15 @@ public enum RetroCameraProfile: String, CaseIterable, Identifiable, Sendable {
         case .xt30: return Color(red: 0.85, green: 0.75, blue: 0.5) // Vintage Tan
         case .dv: return Color(red: 0.2, green: 0.9, blue: 0.2) // Camcorder REC Green
         case .pola: return Color(red: 0.4, green: 0.7, blue: 1.0) // Polaroid Cyan
+        }
+    }
+
+    /// Associated LUT file name and extension, if any
+    public var lutFile: (name: String, ext: String)? {
+        switch self {
+        case .ccd: return ("lut_ccd", "png")
+        case .lomo: return ("lut_lomo", "jpg")
+        default: return nil
         }
     }
 

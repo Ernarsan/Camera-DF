@@ -25,12 +25,21 @@ public struct CompositionAnalyzer {
         pixelBuffer: CVPixelBuffer,
         orientation: CGImagePropertyOrientation = .up
     ) -> CompositionResult {
+        // Single handler — Vision reuses the internal pixel buffer across all requests
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: orientation, options: [:])
 
-        // Tier 1: Face Detection
+        // Create all requests upfront
         let faceRequest = VNDetectFaceRectanglesRequest()
-        if let _ = try? handler.perform([faceRequest]),
-           let faces = faceRequest.results,
+        let humanRequest = VNDetectHumanRectanglesRequest()
+        let saliencyRequest = VNGenerateAttentionBasedSaliencyImageRequest()
+
+        // Single perform() call — eliminates 3× handler creation overhead
+        guard let _ = try? handler.perform([faceRequest, humanRequest, saliencyRequest]) else {
+            return CompositionResult(saliencyBox: nil, suggestedZoom: nil, subjectType: .none)
+        }
+
+        // Tier 1: Face Detection (highest priority)
+        if let faces = faceRequest.results,
            let primaryFace = faces.first {
 
             // Expand face box slightly for natural portrait framing
@@ -50,9 +59,7 @@ public struct CompositionAnalyzer {
         }
 
         // Tier 2: Human Body Detection
-        let humanRequest = VNDetectHumanRectanglesRequest()
-        if let _ = try? handler.perform([humanRequest]),
-           let humans = humanRequest.results,
+        if let humans = humanRequest.results,
            let primaryHuman = humans.first {
 
             let box = primaryHuman.boundingBox
@@ -62,9 +69,7 @@ public struct CompositionAnalyzer {
         }
 
         // Tier 3: Neural Attention Saliency
-        let saliencyRequest = VNGenerateAttentionBasedSaliencyImageRequest()
-        if let _ = try? handler.perform([saliencyRequest]),
-           let results = saliencyRequest.results,
+        if let results = saliencyRequest.results,
            let firstResult = results.first,
            let salientObjects = firstResult.salientObjects,
            let bestObject = salientObjects.first {

@@ -9,6 +9,7 @@ public final class RetroFilterEngine: @unchecked Sendable {
     public static let shared = RetroFilterEngine()
 
     private let context: CIContext
+    private var lutCache: [RetroCameraProfile: LUTFilter] = [:]
 
     public init() {
         self.context = CIContext(options: [
@@ -46,6 +47,27 @@ public final class RetroFilterEngine: @unchecked Sendable {
     ) -> CIImage {
         let params = profile.colorParameters
         var current = inputImage
+
+        // 0. Apply Kapi Cam Y2K LUT if available
+        if let lutInfo = profile.lutFile {
+            let filter: LUTFilter
+            if let cached = lutCache[profile] {
+                filter = cached
+            } else {
+                filter = LUTFilter()
+                if let url = Bundle.main.url(forResource: lutInfo.name, withExtension: lutInfo.ext),
+                   let data = try? Data(contentsOf: url),
+                   let image = UIImage(data: data) {
+                    filter.lutImage = image
+                }
+                lutCache[profile] = filter
+            }
+            
+            filter.inputImage = current
+            if let output = filter.outputImage {
+                current = output
+            }
+        }
 
         // 1. Color Controls (Contrast, Saturation, Brightness)
         if let colorControls = CIFilter(name: "CIColorControls") {
