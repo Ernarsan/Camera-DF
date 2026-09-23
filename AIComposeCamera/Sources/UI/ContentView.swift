@@ -109,7 +109,6 @@ struct ContentView: View {
                 flashMode: viewModel.flashMode,
                 isRecording: viewModel.videoRecorder.isRecording,
                 recordingDuration: viewModel.videoRecorder.recordingDuration,
-                aiFilterRecommendation: viewModel.filterName,
                 currentZoomFactor: viewModel.currentZoomFactor,
                 containerSize: size
             )
@@ -332,23 +331,29 @@ struct ContentView: View {
     private var photoControlRow: some View {
         HStack(spacing: 24) {
             // Photo count / Gallery badge
-            ZStack {
-                Circle()
-                    .fill(.ultraThinMaterial)
-                    .environment(\.colorScheme, .dark)
-                    .frame(width: 48, height: 48)
+            Button {
+                if let url = URL(string: "photos-redirect://") {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .environment(\.colorScheme, .dark)
+                        .frame(width: 48, height: 48)
 
-                Image(systemName: "photo.on.rectangle.angled")
-                    .font(.system(size: 20))
-                    .foregroundColor(.white)
-
-                if viewModel.sessionPhotoCount > 0 {
-                    Text("\(viewModel.sessionPhotoCount)")
-                        .font(.system(size: 10, weight: .bold))
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 20))
                         .foregroundColor(.white)
-                        .padding(4)
-                        .background(Circle().fill(viewModel.selectedCamera.accentColor))
-                        .offset(x: 14, y: -14)
+
+                    if viewModel.sessionPhotoCount > 0 {
+                        Text("\(viewModel.sessionPhotoCount)")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(4)
+                            .background(Circle().fill(viewModel.selectedCamera.accentColor))
+                            .offset(x: 14, y: -14)
+                    }
                 }
             }
 

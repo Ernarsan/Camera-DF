@@ -11,7 +11,6 @@ struct RetroViewfinderHUD: View {
     let flashMode: FlashMode
     let isRecording: Bool
     let recordingDuration: TimeInterval
-    let aiFilterRecommendation: String
     let currentZoomFactor: CGFloat
     let containerSize: CGSize
     
@@ -69,16 +68,7 @@ struct RetroViewfinderHUD: View {
                     Spacer()
 
                     if !isRecording {
-                        // AI Filter Recommendation
-                        if !aiFilterRecommendation.isEmpty && aiFilterRecommendation != "Natural" {
-                            Text("AI: \(aiFilterRecommendation.uppercased())")
-                                .font(.system(size: 9, weight: .heavy, design: .monospaced))
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 2)
-                                .background(Color.yellow.opacity(0.8))
-                                .foregroundColor(.black)
-                                .cornerRadius(2)
-                        }
+
 
                         // AI Super Resolution for Zoom
                         if currentZoomFactor >= 5.0 {
@@ -122,9 +112,9 @@ struct RetroViewfinderHUD: View {
                 // Bottom LCD Status Line
                 HStack {
                     // Left: Exposure / ISO Readout
-                    Text(aiFilterRecommendation == "Night Boost" || aiFilterRecommendation == "Neon Shift" ? "ISO 800  EV -1.0" : "ISO 100  EV +0.0")
+                    Text("ISO 100  EV +0.0")
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundColor(aiFilterRecommendation == "Night Boost" ? .yellow : .white.opacity(0.85))
+                        .foregroundColor(.white.opacity(0.85))
                         .padding(.leading, 16)
                         .padding(.bottom, 12)
 
