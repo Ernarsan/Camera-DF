@@ -1,4 +1,4 @@
-﻿import SwiftUI
+import SwiftUI
 import CoreImage
 
 /// High-end AI Camera processing profiles replacing the old retro filters.
@@ -58,15 +58,15 @@ public enum RetroCameraProfile: String, CaseIterable, Identifiable, Sendable {
     public var colorParameters: RetroColorParams {
         switch self {
         case .leica:
-            return RetroColorParams(redBias: 1.05, greenBias: 0.95, blueBias: 0.9, contrast: 1.25, saturation: 0.95, brightness: -0.05, vignetteIntensity: 0.4, bloomIntensity: 0.1, grainIntensity: 0.0)
+            return RetroColorParams(redBias: 1.05, greenBias: 0.95, blueBias: 0.9, contrast: 1.25, saturation: 0.95, brightness: -0.05, vignetteIntensity: 0.25, bloomIntensity: 0.0, grainIntensity: 0.0)
         case .zeiss:
-            return RetroColorParams(redBias: 1.0, greenBias: 1.0, blueBias: 1.05, contrast: 1.1, saturation: 1.05, brightness: 0.0, vignetteIntensity: 0.1, bloomIntensity: 0.0, grainIntensity: 0.0)
+            return RetroColorParams(redBias: 1.0, greenBias: 1.0, blueBias: 1.05, contrast: 1.12, saturation: 1.05, brightness: 0.0, vignetteIntensity: 0.05, bloomIntensity: 0.0, grainIntensity: 0.0)
         case .aisp:
-            return RetroColorParams(redBias: 1.02, greenBias: 1.02, blueBias: 0.98, contrast: 1.15, saturation: 1.1, brightness: 0.02, vignetteIntensity: 0.0, bloomIntensity: 0.2, grainIntensity: 0.0)
+            return RetroColorParams(redBias: 1.02, greenBias: 1.02, blueBias: 0.98, contrast: 1.15, saturation: 1.1, brightness: 0.02, vignetteIntensity: 0.0, bloomIntensity: 0.0, grainIntensity: 0.0)
         case .vivo:
-            return RetroColorParams(redBias: 1.0, greenBias: 1.0, blueBias: 1.0, contrast: 1.05, saturation: 1.15, brightness: 0.05, vignetteIntensity: 0.1, bloomIntensity: 0.05, grainIntensity: 0.0)
+            return RetroColorParams(redBias: 1.0, greenBias: 1.0, blueBias: 1.0, contrast: 1.08, saturation: 1.15, brightness: 0.03, vignetteIntensity: 0.05, bloomIntensity: 0.0, grainIntensity: 0.0)
         case .fusion:
-            return RetroColorParams(redBias: 0.98, greenBias: 1.05, blueBias: 1.0, contrast: 1.2, saturation: 1.0, brightness: 0.08, vignetteIntensity: 0.2, bloomIntensity: 0.3, grainIntensity: 0.0)
+            return RetroColorParams(redBias: 0.98, greenBias: 1.05, blueBias: 1.0, contrast: 1.2, saturation: 1.05, brightness: 0.05, vignetteIntensity: 0.1, bloomIntensity: 0.0, grainIntensity: 0.0)
         }
     }
 

@@ -852,11 +852,8 @@ extension CameraViewModel: AVCapturePhotoCaptureDelegate {
             let haptic = UIImpactFeedbackGenerator(style: .heavy)
             haptic.impactOccurred()
 
-            // 0. AI Zoom Super Resolution (5x - 10x)
-            var processedRaw = rawImage
-            if self.currentZoomFactor >= 5.0 {
-                processedRaw = AIZoomEnhancer.enhance(image: processedRaw, zoomFactor: self.currentZoomFactor)
-            }
+            // 0. AI Neural Clarity & Super Resolution (Applied to ALL photos for razor-sharp results)
+            let processedRaw = AIZoomEnhancer.enhance(image: rawImage, zoomFactor: self.currentZoomFactor)
 
             // 1. Apply Retro Filter Engine (CCD / G7X / Nokia / Lomo / XT30 / DV / Pola)
             var finalImage = RetroFilterEngine.shared.process(
