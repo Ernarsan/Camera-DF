@@ -156,14 +156,9 @@ public class AlignmentGuide {
 
         let instruction: String
         if isAligned {
-            instruction = "✦ Идеальный ракурс (Shot Suggestion) ✦"
+            instruction = "Perfect Composition"
         } else {
-            // Directional coaching (Google Framing Hints style)
-            if abs(dx) > abs(dy) {
-                instruction = dx > 0 ? "Сместите вправо →" : "← Сместите влево"
-            } else {
-                instruction = dy > 0 ? "Поднимите камеру выше ↑" : "↓ Опустите камеру ниже"
-            }
+            instruction = "Move your phone to align the composition point"
         }
 
         return AlignmentGuidance(

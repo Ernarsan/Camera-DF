@@ -341,8 +341,8 @@ final class CameraViewModel: NSObject, ObservableObject {
         AudioHapticEngine.shared.playHapticZoom()
         isAlignmentModeOn.toggle()
         if isAlignmentModeOn {
-            alignmentInstruction = "ИИ сканирует сцену. Держите телефон ровно"
-            alignmentSubtitle = "Samsung Shot Suggestions & Guided Frame"
+            alignmentInstruction = "Ai Detecting the scene. Keep your phone still."
+            alignmentSubtitle = nil
             targetCompositionPoint = nil
             currentSubjectPoint = nil
             isAligned = false
@@ -758,23 +758,23 @@ extension CameraViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
                     self.isAligned = distance < 0.085
                     
                     if self.isAligned {
-                        self.alignmentInstruction = "✦ Идеальный ракурс (Shot Suggestion) ✦"
-                        self.alignmentSubtitle = guidance.coachingTip ?? "Золотое сечение зафиксировано"
+                        self.alignmentInstruction = "Perfect Composition"
+                        self.alignmentSubtitle = nil
                         if !wasAligned {
                             AudioHapticEngine.shared.playHapticAlignment(isAligned: true)
                         }
                     } else {
+                        self.alignmentInstruction = "Move your phone to align the composition point"
                         if abs(dx) > abs(dy) {
-                            self.alignmentInstruction = dx > 0 ? "Сместите вправо →" : "← Сместите влево"
+                            self.alignmentSubtitle = dx > 0 ? "Move right →" : "← Move left"
                         } else {
-                            self.alignmentInstruction = dy > 0 ? "Поднимите камеру выше ↑" : "↓ Опустите камеру ниже"
+                            self.alignmentSubtitle = dy > 0 ? "Move up ↑" : "↓ Move down"
                         }
-                        self.alignmentSubtitle = guidance.coachingTip
                     }
                 } else {
                     self.isAligned = false
-                    self.alignmentInstruction = "Наведите на объект для авто-ракурса"
-                    self.alignmentSubtitle = guidance.coachingTip
+                    self.alignmentInstruction = "Ai Detecting the scene. Keep your phone still."
+                    self.alignmentSubtitle = nil
                 }
 
                 if let zoom = guidance.suggestedZoom, self.currentZoomFactor < 1.5 {
