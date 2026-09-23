@@ -473,12 +473,24 @@ final class CameraViewModel: NSObject, ObservableObject {
     }
 
     private func doCapture() {
-        let settings = AVCapturePhotoSettings()
+        // --- 10x Camera Quality & iPhone 15 Hardware Optimizations ---
+        var settings: AVCapturePhotoSettings
+        if photoOutput.availablePhotoCodecTypes.contains(.hevc) {
+            settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
+        } else {
+            settings = AVCapturePhotoSettings()
+        }
 
-        // --- 10x Camera Quality Upgrades ---
         if photoOutput.isHighResolutionCaptureEnabled {
             settings.isHighResolutionPhotoEnabled = true
         }
+        
+        if #available(iOS 16.0, *) {
+            if let maxDim = photoOutput.supportedMaxPhotoDimensions.last {
+                settings.maxPhotoDimensions = maxDim
+            }
+        }
+
         if #available(iOS 13.0, *) {
             settings.photoQualityPrioritization = photoOutput.maxPhotoQualityPrioritization
         }
@@ -568,10 +580,11 @@ final class CameraViewModel: NSObject, ObservableObject {
             guard let self = self else { return }
             self.captureSession.beginConfiguration()
 
-            if self.captureSession.canSetSessionPreset(.high) {
-                self.captureSession.sessionPreset = .high
-            } else {
+            // Use .photo preset to unlock 48MP on iPhone 14 Pro / 15
+            if self.captureSession.canSetSessionPreset(.photo) {
                 self.captureSession.sessionPreset = .photo
+            } else {
+                self.captureSession.sessionPreset = .high
             }
 
             // Audio input for video recording
@@ -611,10 +624,15 @@ final class CameraViewModel: NSObject, ObservableObject {
             if self.captureSession.canAddOutput(self.photoOutput) {
                 self.captureSession.addOutput(self.photoOutput)
                 
-                // Enable hardware-level high resolution and quality for AI super res
+                // Enable hardware-level high resolution (48MP on iPhone 15) and quality for AI super res
                 self.photoOutput.isHighResolutionCaptureEnabled = true
                 if #available(iOS 13.0, *) {
                     self.photoOutput.maxPhotoQualityPrioritization = .quality
+                }
+                if #available(iOS 16.0, *) {
+                    if let maxDim = self.photoOutput.supportedMaxPhotoDimensions.last {
+                        self.photoOutput.maxPhotoDimensions = maxDim
+                    }
                 }
             }
 
@@ -631,9 +649,6 @@ final class CameraViewModel: NSObject, ObservableObject {
 
             self.configureOutputOrientations()
             
-            // --- 10x Camera Quality Upgrades ---
-            self.photoOutput.isHighResolutionCaptureEnabled = true
-            
             self.captureSession.commitConfiguration()
             self.captureSession.startRunning()
         }
@@ -648,6 +663,17 @@ final class CameraViewModel: NSObject, ObservableObject {
             if device.isExposureModeSupported(.continuousAutoExposure) {
                 device.exposureMode = .continuousAutoExposure
             }
+            
+            // iPhone 15 Hardware Optimization: Set 60 FPS for viewfinder if supported
+            let desiredFrameRate = 60.0
+            for range in device.activeFormat.videoSupportedFrameRateRanges {
+                if range.maxFrameRate >= desiredFrameRate && range.minFrameRate <= desiredFrameRate {
+                    device.activeVideoMinFrameDuration = CMTimeMake(value: 1, timescale: Int32(desiredFrameRate))
+                    device.activeVideoMaxFrameDuration = CMTimeMake(value: 1, timescale: Int32(desiredFrameRate))
+                    break
+                }
+            }
+            
             device.unlockForConfiguration()
         } catch {
             print("[CameraVM] Failed to configure focus/exposure: \(error)")
