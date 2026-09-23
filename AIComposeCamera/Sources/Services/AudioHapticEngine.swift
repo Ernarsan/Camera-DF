@@ -1,5 +1,6 @@
 import UIKit
 import AVFoundation
+import AudioToolbox
 
 public class AudioHapticEngine {
     public static let shared = AudioHapticEngine()
