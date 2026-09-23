@@ -110,6 +110,7 @@ struct ContentView: View {
                 isRecording: viewModel.videoRecorder.isRecording,
                 recordingDuration: viewModel.videoRecorder.recordingDuration,
                 aiFilterRecommendation: viewModel.filterName,
+                currentZoomFactor: viewModel.currentZoomFactor,
                 containerSize: size
             )
 

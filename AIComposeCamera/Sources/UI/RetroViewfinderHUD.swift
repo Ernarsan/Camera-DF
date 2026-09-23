@@ -12,6 +12,7 @@ struct RetroViewfinderHUD: View {
     let isRecording: Bool
     let recordingDuration: TimeInterval
     let aiFilterRecommendation: String
+    let currentZoomFactor: CGFloat
     let containerSize: CGSize
     
     @State private var blinkToggle: Bool = false
@@ -75,6 +76,17 @@ struct RetroViewfinderHUD: View {
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 2)
                                 .background(Color.yellow.opacity(0.8))
+                                .foregroundColor(.black)
+                                .cornerRadius(2)
+                        }
+
+                        // AI Super Resolution for Zoom
+                        if currentZoomFactor >= 5.0 {
+                            Text("AI SUPER RES")
+                                .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 2)
+                                .background(Color.green.opacity(0.8))
                                 .foregroundColor(.black)
                                 .cornerRadius(2)
                         }
